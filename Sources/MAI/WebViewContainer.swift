@@ -43,9 +43,16 @@ struct WebViewRepresentable: NSViewRepresentable {
     func makeNSView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
 
-        // Configuración de rendimiento
-        config.processPool = WKProcessPool()
+        // Configuración de preferencias
         config.preferences.javaScriptCanOpenWindowsAutomatically = false
+
+        // IMPORTANTE: Habilitar fullscreen de elementos HTML5 (videos de YouTube, etc.)
+        if #available(macOS 12.0, *) {
+            config.preferences.isElementFullscreenEnabled = true
+        }
+
+        // Habilitar reproducción de medios
+        config.mediaTypesRequiringUserActionForPlayback = []
 
         // Preferencias web
         let preferences = WKWebpagePreferences()
