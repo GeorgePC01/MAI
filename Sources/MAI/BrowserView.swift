@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Vista principal del navegador
 struct BrowserView: View {
@@ -36,6 +37,10 @@ struct BrowserView: View {
             StatusBar()
         }
         .background(Color(NSColor.windowBackgroundColor))
+        .onTapGesture {
+            // Activar la aplicación cuando se hace clic en la ventana
+            NSApplication.shared.activate(ignoringOtherApps: true)
+        }
     }
 }
 

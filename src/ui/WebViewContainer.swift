@@ -233,8 +233,3 @@ struct WebViewRepresentable: NSViewRepresentable {
     }
 }
 
-#Preview {
-    WebViewContainer()
-        .environmentObject(BrowserState())
-        .frame(width: 800, height: 600)
-}

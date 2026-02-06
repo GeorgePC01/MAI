@@ -12,7 +12,7 @@ struct MAIApp: App {
                 .environmentObject(browserState)
                 .frame(minWidth: 800, minHeight: 600)
         }
-        .windowStyle(.hiddenTitleBar)
+        .windowStyle(.automatic)
         .commands {
             // Comandos de menú personalizados
             CommandGroup(replacing: .newItem) {
@@ -102,6 +102,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Configurar apariencia
         NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+
+        // CRÍTICO: Activar la aplicación y traerla al frente
+        NSApplication.shared.activate(ignoringOtherApps: true)
+
+        // Asegurar que la ventana principal sea key y main
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            if let window = NSApplication.shared.windows.first {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -110,5 +120,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        // Cuando la app se activa, asegurar que la ventana esté al frente
+        if let window = NSApplication.shared.windows.first {
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 }

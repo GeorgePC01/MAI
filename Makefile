@@ -1,12 +1,14 @@
 # Makefile para MAI Browser
 
-.PHONY: build run clean test help
+.PHONY: build run clean test help bundle app
 
 # Variables
 SWIFT = swift
 BUILD_DIR = .build
 RELEASE_DIR = $(BUILD_DIR)/release
-DEBUG_DIR = $(BUILD_DIR)/debug
+DEBUG_DIR = $(BUILD_DIR)/arm64-apple-macosx/debug
+APP_NAME = MAI
+BUNDLE = $(APP_NAME).app
 
 help: ## Muestra esta ayuda
 	@echo "MAI Browser - Comandos disponibles:"
@@ -17,15 +19,32 @@ help: ## Muestra esta ayuda
 build: ## Compila el navegador en modo release
 	@echo "🔨 Compilando MAI Browser (Release)..."
 	@$(SWIFT) build -c release
-	@echo "✅ Compilación completada: $(RELEASE_DIR)/MAI"
+	@echo "✅ Compilación completada"
 
 build-debug: ## Compila en modo debug
 	@echo "🔨 Compilando MAI Browser (Debug)..."
 	@$(SWIFT) build
 	@echo "✅ Compilación completada: $(DEBUG_DIR)/MAI"
 
-run: build-debug ## Compila y ejecuta el navegador
-	@echo "🚀 Ejecutando MAI Browser...\n"
+bundle: build-debug ## Crea el .app bundle
+	@echo "📦 Creando $(BUNDLE)..."
+	@rm -rf $(BUNDLE)
+	@mkdir -p $(BUNDLE)/Contents/MacOS
+	@mkdir -p $(BUNDLE)/Contents/Resources
+	@cp $(DEBUG_DIR)/$(APP_NAME) $(BUNDLE)/Contents/MacOS/
+	@cp Resources/Info.plist $(BUNDLE)/Contents/
+	@touch $(BUNDLE)
+	@echo "✅ Bundle creado: $(BUNDLE)"
+
+app: bundle ## Compila y ejecuta como .app (RECOMENDADO)
+	@echo "🚀 Ejecutando $(BUNDLE)..."
+	@open $(BUNDLE)
+
+run: app ## Alias para 'app' - ejecuta el navegador correctamente
+	@true
+
+run-dev: build-debug ## Ejecuta sin bundle (el foco puede no funcionar)
+	@echo "⚠️  Modo desarrollo - el foco puede no funcionar"
 	@$(DEBUG_DIR)/MAI
 
 test: ## Ejecuta los tests
@@ -35,39 +54,36 @@ test: ## Ejecuta los tests
 clean: ## Limpia los archivos de compilación
 	@echo "🧹 Limpiando build artifacts..."
 	@rm -rf $(BUILD_DIR)
+	@rm -rf $(BUNDLE)
 	@echo "✅ Limpieza completada"
 
-xcode: ## Genera proyecto Xcode
-	@echo "📦 Generando proyecto Xcode..."
-	@$(SWIFT) package generate-xcodeproj
-	@echo "✅ Proyecto generado: MAI.xcodeproj"
-	@open MAI.xcodeproj
+xcode: ## Abre el proyecto en Xcode
+	@echo "📦 Abriendo en Xcode..."
+	@open Package.swift
 
 format: ## Formatea el código Swift
 	@echo "💅 Formateando código..."
-	@find src -name "*.swift" -exec swift-format -i {} \;
+	@find Sources -name "*.swift" -exec swift-format -i {} \; 2>/dev/null || true
 	@echo "✅ Código formateado"
 
 stats: ## Muestra estadísticas del proyecto
 	@echo "📊 Estadísticas del proyecto MAI:"
 	@echo ""
 	@echo "Archivos Swift:"
-	@find src -name "*.swift" | wc -l
+	@find Sources src -name "*.swift" 2>/dev/null | wc -l
 	@echo ""
 	@echo "Líneas de código:"
-	@find src -name "*.swift" -exec cat {} \; | wc -l
-	@echo ""
-	@echo "Módulos:"
-	@ls -d modules/*/ | wc -l
+	@find Sources src -name "*.swift" -exec cat {} \; 2>/dev/null | wc -l
 
-install: build ## Instala MAI en /Applications
+install: bundle ## Instala MAI en /Applications
 	@echo "📦 Instalando MAI Browser..."
-	@# TODO: Crear bundle .app e instalar
-	@echo "⚠️  Instalación aún no implementada"
+	@rm -rf /Applications/$(BUNDLE)
+	@cp -r $(BUNDLE) /Applications/
+	@echo "✅ MAI instalado en /Applications/$(BUNDLE)"
 
 uninstall: ## Desinstala MAI
 	@echo "🗑️  Desinstalando MAI Browser..."
-	@rm -rf /Applications/MAI.app
+	@rm -rf /Applications/$(BUNDLE)
 	@echo "✅ MAI desinstalado"
 
 .DEFAULT_GOAL := help

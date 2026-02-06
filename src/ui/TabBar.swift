@@ -143,18 +143,3 @@ struct TabBarBackground: View {
     }
 }
 
-#Preview {
-    VStack {
-        TabBar()
-            .environmentObject({
-                let state = BrowserState()
-                state.createTab(url: "https://google.com")
-                state.tabs[0].title = "Google"
-                state.createTab(url: "https://github.com")
-                state.tabs[1].title = "GitHub"
-                return state
-            }())
-        Spacer()
-    }
-    .frame(width: 800, height: 100)
-}

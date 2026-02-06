@@ -12,7 +12,7 @@ struct MAIApp: App {
                 .environmentObject(browserState)
                 .frame(minWidth: 800, minHeight: 600)
         }
-        .windowStyle(.hiddenTitleBar)
+        .windowStyle(.automatic)
         .commands {
             // Comandos de menú personalizados
             CommandGroup(replacing: .newItem) {
@@ -97,11 +97,29 @@ struct MAIApp: App {
 
 /// App Delegate para configuración adicional
 class AppDelegate: NSObject, NSApplicationDelegate {
+
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        // CRÍTICO: Establecer política de activación ANTES de que termine el lanzamiento
+        // Esto permite que la app tome el foco incluso sin bundle
+        NSApp.setActivationPolicy(.regular)
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("MAI Browser iniciado")
 
         // Configurar apariencia
         NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+
+        // Activar la aplicación
+        NSApp.activate(ignoringOtherApps: true)
+
+        // Asegurar que la ventana tome foco
+        DispatchQueue.main.async {
+            if let window = NSApp.windows.first {
+                window.makeKeyAndOrderFront(nil)
+                window.orderFrontRegardless()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -110,5 +128,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        if let window = NSApplication.shared.windows.first {
+            window.makeKeyAndOrderFront(nil)
+        }
     }
 }

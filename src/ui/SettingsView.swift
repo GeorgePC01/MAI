@@ -214,8 +214,3 @@ struct AdvancedSettingsView: View {
 }
 
 import WebKit
-
-#Preview {
-    SettingsView()
-        .environmentObject(BrowserState())
-}
