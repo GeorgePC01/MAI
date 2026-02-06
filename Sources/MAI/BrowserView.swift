@@ -29,9 +29,11 @@ struct BrowserView: View {
                         .transition(.move(edge: .leading))
                 }
 
-                // WebView
+                // WebView - expandir para llenar todo el espacio
                 WebViewContainer()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // Barra de estado
             StatusBar()
