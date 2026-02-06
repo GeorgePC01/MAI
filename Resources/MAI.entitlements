@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Sandboxing deshabilitado para desarrollo (habilitar en producción) -->
+    <key>com.apple.security.app-sandbox</key>
+    <false/>
+
+    <!-- Acceso a red (necesario para navegador) -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Bluetooth para passkeys cross-device -->
+    <key>com.apple.security.device.bluetooth</key>
+    <true/>
+
+    <!-- Keychain para almacenar credenciales -->
+    <key>com.apple.security.keychain-access-groups</key>
+    <array>
+        <string>$(AppIdentifierPrefix)com.mai.browser</string>
+    </array>
+
+    <!-- Cámara (para Face ID si aplica) -->
+    <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <!-- USB (para llaves de seguridad físicas como YubiKey) -->
+    <key>com.apple.security.device.usb</key>
+    <true/>
+</dict>
+</plist>

@@ -33,6 +33,9 @@ bundle: build-debug ## Crea el .app bundle
 	@mkdir -p $(BUNDLE)/Contents/Resources
 	@cp $(DEBUG_DIR)/$(APP_NAME) $(BUNDLE)/Contents/MacOS/
 	@cp Resources/Info.plist $(BUNDLE)/Contents/
+	@cp Resources/MAI.entitlements $(BUNDLE)/Contents/Resources/ 2>/dev/null || true
+	@echo "🔐 Firmando app con entitlements..."
+	@codesign --force --deep --sign - --entitlements Resources/MAI.entitlements $(BUNDLE) 2>/dev/null || echo "⚠️  Firma sin entitlements (se requiere certificado de desarrollador para passkeys)"
 	@touch $(BUNDLE)
 	@echo "✅ Bundle creado: $(BUNDLE)"
 

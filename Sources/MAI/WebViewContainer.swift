@@ -15,6 +15,113 @@ struct WebViewContainer: View {
     }
 }
 
+/// Gestor centralizado de configuración web para compartir cookies entre tabs
+class WebViewConfigurationManager {
+    static let shared = WebViewConfigurationManager()
+
+    /// Data store persistente compartido entre todas las tabs
+    let dataStore: WKWebsiteDataStore
+
+    private init() {
+        // Usar el data store por defecto que persiste cookies y sesiones
+        self.dataStore = WKWebsiteDataStore.default()
+    }
+
+    /// Crea una configuración para una nueva WebView
+    func createConfiguration() -> WKWebViewConfiguration {
+        let config = WKWebViewConfiguration()
+
+        // CRÍTICO: Usar data store persistente para cookies/sesiones OAuth
+        config.websiteDataStore = dataStore
+
+        // Identificarse como Safari en la configuración
+        config.applicationNameForUserAgent = "Version/18.2 Safari/605.1.15"
+
+        // Preferencias de JavaScript
+        config.preferences.javaScriptCanOpenWindowsAutomatically = true
+
+        // Habilitar fullscreen de elementos HTML5
+        if #available(macOS 12.0, *) {
+            config.preferences.isElementFullscreenEnabled = true
+        }
+
+        // Habilitar reproducción de medios sin interacción
+        config.mediaTypesRequiringUserActionForPlayback = []
+        config.suppressesIncrementalRendering = false
+
+        // Preferencias web - CRÍTICO para Google
+        let preferences = WKWebpagePreferences()
+        preferences.allowsContentJavaScript = true
+        if #available(macOS 12.3, *) {
+            preferences.preferredContentMode = .desktop
+        }
+        config.defaultWebpagePreferences = preferences
+
+        // Inyectar script anti-detección al inicio de cada página
+        let antiDetectionScript = WKUserScript(
+            source: Self.navigatorSpoofingScript,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: false  // También en iframes (importante para OAuth)
+        )
+        config.userContentController.addUserScript(antiDetectionScript)
+
+        return config
+    }
+
+    /// Script para ocultar propiedades que delatan WKWebView
+    private static let navigatorSpoofingScript = """
+    (function() {
+        // Ocultar detección de WebDriver (WKWebView lo expone)
+        Object.defineProperty(navigator, 'webdriver', {
+            get: () => false,
+            configurable: true
+        });
+
+        // Vendor correcto de Safari
+        Object.defineProperty(navigator, 'vendor', {
+            get: () => 'Apple Computer, Inc.',
+            configurable: true
+        });
+
+        // Plataforma correcta
+        Object.defineProperty(navigator, 'platform', {
+            get: () => 'MacIntel',
+            configurable: true
+        });
+
+        // Ocultar userAgentData (Chrome-specific, Safari no lo tiene)
+        Object.defineProperty(navigator, 'userAgentData', {
+            get: () => undefined,
+            configurable: true
+        });
+
+        // Eliminar rastros de Chrome si existen
+        if (window.chrome !== undefined) {
+            delete window.chrome;
+        }
+
+        // Asegurar que plugins parezcan de Safari
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => {
+                return {
+                    length: 5,
+                    item: (i) => null,
+                    namedItem: (name) => null,
+                    refresh: () => {}
+                };
+            },
+            configurable: true
+        });
+
+        // Languages de Safari
+        Object.defineProperty(navigator, 'languages', {
+            get: () => ['es-ES', 'es', 'en-US', 'en'],
+            configurable: true
+        });
+    })();
+    """
+}
+
 /// Vista cuando no hay tabs
 struct EmptyStateView: View {
     var body: some View {
@@ -41,30 +148,19 @@ struct WebViewRepresentable: NSViewRepresentable {
     @ObservedObject var browserState: BrowserState
 
     func makeNSView(context: Context) -> WKWebView {
-        let config = WKWebViewConfiguration()
+        // Usar configuración compartida para persistir cookies y sesiones OAuth
+        let config = WebViewConfigurationManager.shared.createConfiguration()
 
-        // Configuración de preferencias
-        config.preferences.javaScriptCanOpenWindowsAutomatically = false
-
-        // IMPORTANTE: Habilitar fullscreen de elementos HTML5 (videos de YouTube, etc.)
-        if #available(macOS 12.0, *) {
-            config.preferences.isElementFullscreenEnabled = true
-        }
-
-        // Habilitar reproducción de medios
-        config.mediaTypesRequiringUserActionForPlayback = []
-
-        // Preferencias web
-        let preferences = WKWebpagePreferences()
-        preferences.allowsContentJavaScript = true
-        config.defaultWebpagePreferences = preferences
-
-        // Crear WebView
+        // Crear WebView con configuración compartida
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
         webView.uiDelegate = context.coordinator
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
+
+        // User-Agent de Safari 18.2 (macOS Sequoia) para compatibilidad con Google
+        // Usar formato estándar que Google reconoce
+        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15"
 
         // Guardar referencia en el tab
         tab.webView = webView
@@ -195,9 +291,81 @@ struct WebViewRepresentable: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            // Permitir toda navegación por ahora
-            // TODO: Implementar bloqueo de ads/trackers aquí
+            guard let url = navigationAction.request.url else {
+                decisionHandler(.allow)
+                return
+            }
+
+            // Verificar si debe bloquearse (respeta whitelist de OAuth)
+            if PrivacyManager.shared.shouldBlock(url: url) {
+                PrivacyManager.shared.recordBlockedRequest()
+                print("🛡️ Bloqueado: \(url.host ?? url.absoluteString)")
+                decisionHandler(.cancel)
+                return
+            }
+
             decisionHandler(.allow)
+        }
+
+        // Manejar challenges de autenticación (certificados HTTPS, auth básica)
+        func webView(_ webView: WKWebView, didReceive challenge: URLAuthenticationChallenge, completionHandler: @escaping (URLSession.AuthChallengeDisposition, URLCredential?) -> Void) {
+            let protectionSpace = challenge.protectionSpace
+
+            // Manejar certificados de servidor (HTTPS)
+            if protectionSpace.authenticationMethod == NSURLAuthenticationMethodServerTrust {
+                if let serverTrust = protectionSpace.serverTrust {
+                    let credential = URLCredential(trust: serverTrust)
+                    completionHandler(.useCredential, credential)
+                    return
+                }
+            }
+
+            // Manejar autenticación HTTP básica (mostrar diálogo)
+            if protectionSpace.authenticationMethod == NSURLAuthenticationMethodHTTPBasic ||
+               protectionSpace.authenticationMethod == NSURLAuthenticationMethodHTTPDigest {
+                DispatchQueue.main.async {
+                    self.showAuthenticationDialog(for: protectionSpace) { username, password in
+                        if let username = username, let password = password {
+                            let credential = URLCredential(user: username, password: password, persistence: .forSession)
+                            completionHandler(.useCredential, credential)
+                        } else {
+                            completionHandler(.cancelAuthenticationChallenge, nil)
+                        }
+                    }
+                }
+                return
+            }
+
+            // Para otros tipos, usar el comportamiento por defecto
+            completionHandler(.performDefaultHandling, nil)
+        }
+
+        private func showAuthenticationDialog(for protectionSpace: URLProtectionSpace, completion: @escaping (String?, String?) -> Void) {
+            let alert = NSAlert()
+            alert.messageText = "Autenticación requerida"
+            alert.informativeText = "El sitio \(protectionSpace.host) requiere usuario y contraseña"
+            alert.addButton(withTitle: "Iniciar sesión")
+            alert.addButton(withTitle: "Cancelar")
+
+            let usernameField = NSTextField(frame: NSRect(x: 0, y: 28, width: 200, height: 24))
+            usernameField.placeholderString = "Usuario"
+
+            let passwordField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            passwordField.placeholderString = "Contraseña"
+
+            let stackView = NSStackView(views: [usernameField, passwordField])
+            stackView.orientation = .vertical
+            stackView.spacing = 4
+            stackView.frame = NSRect(x: 0, y: 0, width: 200, height: 56)
+
+            alert.accessoryView = stackView
+
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                completion(usernameField.stringValue, passwordField.stringValue)
+            } else {
+                completion(nil, nil)
+            }
         }
 
         // MARK: - WKUIDelegate
@@ -227,6 +395,24 @@ struct WebViewRepresentable: NSViewRepresentable {
             alert.addButton(withTitle: "Cancelar")
             let response = alert.runModal()
             completionHandler(response == .alertFirstButtonReturn)
+        }
+
+        func webView(_ webView: WKWebView, runJavaScriptTextInputPanelWithPrompt prompt: String, defaultText: String?, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping (String?) -> Void) {
+            let alert = NSAlert()
+            alert.messageText = prompt
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Cancelar")
+
+            let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 200, height: 24))
+            textField.stringValue = defaultText ?? ""
+            alert.accessoryView = textField
+
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                completionHandler(textField.stringValue)
+            } else {
+                completionHandler(nil)
+            }
         }
 
         // MARK: - Helpers

@@ -2,41 +2,66 @@
 
 ## Fase 1: MVP (Q1-Q2 2026)
 
-### Core Engine ✅ (Iniciado)
+### Core Engine ✅
 - [x] Estructura del proyecto
 - [x] BrowserEngine básico
-- [ ] ProcessManager implementation
-- [ ] ResourceManager con mediciones reales
+- [x] ProcessManager (WKWebView maneja esto)
+- [x] ResourceManager con mediciones reales (memoria/CPU)
 - [ ] Event bus para comunicación
 
-### UI (Alta Prioridad)
-- [ ] MainWindow SwiftUI
-- [ ] TabBar con gestión de pestañas
-- [ ] AddressBar con auto-completado
-- [ ] WebView integration
-- [ ] Context menus
-- [ ] Settings panel
+### UI ✅ (Completado)
+- [x] MainWindow SwiftUI
+- [x] TabBar con gestión de pestañas
+- [x] AddressBar con navegación
+- [x] WebView integration (WKWebView)
+- [x] Context menus (JavaScript alerts/confirms)
+- [x] Settings panel completo
+- [x] Sidebar (Favoritos/Historial/Descargas)
+- [x] Barra de estado con estadísticas
 
-### Navegación
-- [ ] Navegación básica (forward/back)
-- [ ] Refresh/Stop
-- [ ] Bookmarks manager
-- [ ] History tracking
-- [ ] Downloads manager
+### Navegación ✅
+- [x] Navegación básica (forward/back)
+- [x] Refresh/Stop
+- [x] Zoom (in/out/reset)
+- [x] Historial funcional con persistencia
+- [x] Keyboard shortcuts (Cmd+Y, Cmd+J, Cmd+B, etc.)
+- [ ] Bookmarks manager (UI existe, falta persistencia)
+- [ ] Downloads manager (UI placeholder)
+
+### Seguridad y OAuth ✅
+- [x] Cookies persistentes entre sesiones
+- [x] Soporte OAuth (Google, Microsoft, etc.)
+- [x] Whitelist de dominios OAuth
+- [x] Autenticación HTTP básica
+- [x] Manejo de certificados HTTPS
+- [x] JavaScript prompts (alert, confirm, prompt)
+- [ ] Passkeys/WebAuthn (requiere Apple Developer)
+
+### Privacidad ✅
+- [x] PrivacyManager con configuración
+- [x] Bloqueo de trackers (40+ dominios)
+- [x] Bloqueo de ads
+- [x] Whitelist OAuth (no bloquea login)
+- [x] Contador de requests bloqueadas
+- [x] Toggles en Settings
+- [ ] Fingerprinting protection (diseñado, no implementado)
+- [ ] DNS over HTTPS (configuración existe)
 
 ### Módulos Core
-- [ ] AdBlocker funcional
-  - [ ] Filter engine
+- [x] AdBlocker básico (integrado en PrivacyManager)
+  - [x] Lista de dominios bloqueados
+  - [x] Whitelist para OAuth
   - [ ] EasyList integration
-  - [ ] Custom rules
-- [ ] PrivacyShield
-  - [ ] Anti-fingerprinting
-  - [ ] Cookie management
-  - [ ] Tracking prevention
+  - [ ] Custom rules UI
+- [x] PrivacyShield básico
+  - [ ] Anti-fingerprinting activo
+  - [x] Cookie management
+  - [x] Tracking prevention
 - [ ] ReaderMode
   - [ ] Article detection
   - [ ] Clean layout
   - [ ] Font/size controls
+- [ ] Buscar en página (Cmd+F)
 
 ## Fase 2: Funcionalidades Core (Q3 2026)
 
@@ -48,15 +73,15 @@
 - [ ] Auto-categorization
 
 ### Performance
-- [ ] Memory profiling
-- [ ] CPU profiling
+- [x] Memory profiling básico
+- [x] CPU monitoring básico
 - [ ] Startup optimization
-- [ ] Lazy loading
-- [ ] Tab suspension
+- [ ] Lazy loading de tabs
+- [ ] Tab suspension automática
 
 ### Networking
 - [ ] HTTP/3 support
-- [ ] DNS over HTTPS
+- [ ] DNS over HTTPS implementation
 - [ ] Smart caching
 - [ ] Offline mode
 
@@ -83,6 +108,21 @@
 - [ ] Platform abstraction layer
 - [ ] Unified build system
 
+## Distribución y Negocio
+
+### Licenciamiento ✅
+- [x] Análisis de costos (ver docs/LICENSING.md)
+- [x] Apple Developer Program ($99/año = suficiente)
+- [ ] Obtener cuenta Apple Developer
+- [ ] Configurar firma de código
+- [ ] Notarización para distribución
+
+### Lanzamiento
+- [ ] Sitio web
+- [ ] Modelo de precios
+- [ ] Procesador de pagos (Stripe/Paddle)
+- [ ] Beta pública
+
 ## Futuro
 
 ### Advanced Features
@@ -102,4 +142,14 @@
 
 ---
 
-**Última actualización: 2026-01-24**
+## Estadísticas del Proyecto
+
+| Métrica | Valor |
+|---------|-------|
+| RAM promedio | ~167 MB (vs Chrome 2.5+ GB) |
+| Archivos Swift | 12 |
+| Líneas de código | ~2,500 |
+
+---
+
+**Última actualización: 2026-02-06**

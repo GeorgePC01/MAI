@@ -81,24 +81,38 @@ struct GeneralSettingsView: View {
 
 /// Configuración de privacidad
 struct PrivacySettingsView: View {
-    @AppStorage("blockTrackers") private var blockTrackers = true
-    @AppStorage("blockAds") private var blockAds = true
-    @AppStorage("blockThirdPartyCookies") private var blockThirdPartyCookies = true
+    @ObservedObject private var privacyManager = PrivacyManager.shared
     @AppStorage("dnsOverHTTPS") private var dnsOverHTTPS = true
-    @AppStorage("fingerprintProtection") private var fingerprintProtection = true
     @AppStorage("clearDataOnExit") private var clearDataOnExit = false
 
     var body: some View {
         Form {
             Section("Bloqueo") {
-                Toggle("Bloquear rastreadores", isOn: $blockTrackers)
-                Toggle("Bloquear anuncios", isOn: $blockAds)
-                Toggle("Bloquear cookies de terceros", isOn: $blockThirdPartyCookies)
+                Toggle("Bloquear rastreadores", isOn: $privacyManager.blockTrackers)
+                Toggle("Bloquear anuncios", isOn: $privacyManager.blockAds)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Bloquear cookies de terceros", isOn: $privacyManager.blockThirdPartyCookies)
+                    Text("Los dominios de OAuth (Google, Microsoft, etc.) están en whitelist")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             Section("Protección") {
                 Toggle("DNS sobre HTTPS", isOn: $dnsOverHTTPS)
-                Toggle("Protección contra fingerprinting", isOn: $fingerprintProtection)
+                Toggle("Protección contra fingerprinting", isOn: $privacyManager.fingerprintProtection)
+            }
+
+            Section("Estadísticas") {
+                HStack {
+                    Label("\(privacyManager.blockedRequestsCount) requests bloqueadas", systemImage: "shield.checkered")
+                    Spacer()
+                    Button("Reiniciar") {
+                        privacyManager.resetBlockedCount()
+                    }
+                    .buttonStyle(.borderless)
+                }
             }
 
             Section("Datos") {

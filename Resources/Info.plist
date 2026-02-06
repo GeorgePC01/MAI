@@ -24,5 +24,17 @@
     <true/>
     <key>NSPrincipalClass</key>
     <string>NSApplication</string>
+
+    <!-- Permisos para Passkeys/WebAuthn -->
+    <key>NSBluetoothAlwaysUsageDescription</key>
+    <string>MAI Browser necesita Bluetooth para autenticación con passkeys en otros dispositivos</string>
+    <key>NSBluetoothPeripheralUsageDescription</key>
+    <string>MAI Browser necesita Bluetooth para autenticación con passkeys en otros dispositivos</string>
+    <key>NSCameraUsageDescription</key>
+    <string>MAI Browser puede usar la cámara para autenticación biométrica</string>
+
+    <!-- Soporte para llaves de seguridad USB -->
+    <key>com.apple.developer.web-browser</key>
+    <true/>
 </dict>
 </plist>

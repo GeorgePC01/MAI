@@ -47,19 +47,12 @@ struct BrowserView: View {
 /// Barra lateral con bookmarks e historial
 struct SidebarView: View {
     @EnvironmentObject var browserState: BrowserState
-    @State private var selectedSection: SidebarSection = .bookmarks
-
-    enum SidebarSection: String, CaseIterable {
-        case bookmarks = "Favoritos"
-        case history = "Historial"
-        case downloads = "Descargas"
-    }
 
     var body: some View {
         VStack(spacing: 0) {
             // Selector de sección
-            Picker("", selection: $selectedSection) {
-                ForEach(SidebarSection.allCases, id: \.self) { section in
+            Picker("", selection: $browserState.sidebarSection) {
+                ForEach(BrowserState.SidebarTab.allCases, id: \.self) { section in
                     Text(section.rawValue).tag(section)
                 }
             }
@@ -70,7 +63,7 @@ struct SidebarView: View {
 
             // Contenido
             List {
-                switch selectedSection {
+                switch browserState.sidebarSection {
                 case .bookmarks:
                     BookmarksSection()
                 case .history:
@@ -215,6 +208,7 @@ struct DownloadsSection: View {
 /// Barra de estado inferior
 struct StatusBar: View {
     @EnvironmentObject var browserState: BrowserState
+    @ObservedObject private var privacyManager = PrivacyManager.shared
 
     var body: some View {
         HStack {
@@ -225,6 +219,17 @@ struct StatusBar: View {
                 Text("Cargando...")
                     .font(.caption)
                     .foregroundColor(.secondary)
+            }
+
+            // Contador de bloqueos (si hay)
+            if privacyManager.blockedRequestsCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "shield.checkered")
+                        .foregroundColor(.green)
+                    Text("\(privacyManager.blockedRequestsCount) bloqueados")
+                }
+                .font(.caption)
+                .foregroundColor(.green)
             }
 
             Spacer()

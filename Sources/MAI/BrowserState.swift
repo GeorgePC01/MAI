@@ -9,9 +9,31 @@ class BrowserState: ObservableObject {
     @Published var tabs: [Tab] = []
     @Published var currentTabIndex: Int = 0
     @Published var showSidebar: Bool = false
+    @Published var sidebarSection: SidebarTab = .bookmarks
     @Published var showFindInPage: Bool = false
     @Published var isLoading: Bool = false
     @Published var loadingProgress: Double = 0
+
+    enum SidebarTab: String, CaseIterable {
+        case bookmarks = "Favoritos"
+        case history = "Historial"
+        case downloads = "Descargas"
+    }
+
+    func showHistory() {
+        sidebarSection = .history
+        showSidebar = true
+    }
+
+    func showDownloads() {
+        sidebarSection = .downloads
+        showSidebar = true
+    }
+
+    func showBookmarks() {
+        sidebarSection = .bookmarks
+        showSidebar = true
+    }
 
     // MARK: - Computed Properties
 

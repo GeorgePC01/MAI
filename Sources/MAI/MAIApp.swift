@@ -85,6 +85,23 @@ struct MAIApp: App {
 
                 Toggle("Barra Lateral", isOn: $browserState.showSidebar)
                     .keyboardShortcut("s", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Historial") {
+                    browserState.showHistory()
+                }
+                .keyboardShortcut("y", modifiers: .command)
+
+                Button("Descargas") {
+                    browserState.showDownloads()
+                }
+                .keyboardShortcut("j", modifiers: .command)
+
+                Button("Favoritos") {
+                    browserState.showBookmarks()
+                }
+                .keyboardShortcut("b", modifiers: .command)
             }
         }
 
