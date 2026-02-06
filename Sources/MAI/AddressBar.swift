@@ -1,11 +1,11 @@
 import SwiftUI
+import AppKit
 
 /// Barra de direcciones del navegador
 struct AddressBar: View {
     @EnvironmentObject var browserState: BrowserState
     @State private var urlText: String = ""
     @State private var isEditing: Bool = false
-    @FocusState private var isFocused: Bool
 
     var body: some View {
         HStack(spacing: 8) {
@@ -13,10 +13,9 @@ struct AddressBar: View {
             NavigationButtons()
 
             // Campo de URL
-            URLField(
+            URLTextField(
                 text: $urlText,
                 isEditing: $isEditing,
-                isFocused: _isFocused,
                 onSubmit: navigateToURL
             )
 
@@ -39,7 +38,6 @@ struct AddressBar: View {
     private func navigateToURL() {
         browserState.navigate(to: urlText)
         isEditing = false
-        isFocused = false
     }
 }
 
@@ -99,56 +97,63 @@ struct NavigationButtonStyle: ButtonStyle {
     }
 }
 
-/// Campo de URL
-struct URLField: View {
+/// Campo de URL usando NSTextField nativo para mejor input handling
+struct URLTextField: NSViewRepresentable {
     @Binding var text: String
     @Binding var isEditing: Bool
-    @FocusState var isFocused: Bool
     let onSubmit: () -> Void
 
-    @EnvironmentObject var browserState: BrowserState
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = NSTextField()
+        textField.delegate = context.coordinator
+        textField.placeholderString = "Buscar o escribir dirección"
+        textField.font = .systemFont(ofSize: 13)
+        textField.isBordered = false
+        textField.backgroundColor = .clear
+        textField.focusRingType = .none
+        textField.cell?.isScrollable = true
+        textField.cell?.wraps = false
+        textField.lineBreakMode = .byTruncatingTail
+        return textField
+    }
 
-    var body: some View {
-        HStack(spacing: 8) {
-            // Icono de seguridad
-            SecurityIndicator(url: text)
-
-            // Campo de texto
-            TextField("Buscar o escribir dirección", text: $text)
-                .textFieldStyle(.plain)
-                .font(.system(size: 13))
-                .focused($isFocused)
-                .onSubmit(onSubmit)
-                .onChange(of: isFocused) { focused in
-                    isEditing = focused
-                    if focused {
-                        // Seleccionar todo el texto al enfocar
-                        DispatchQueue.main.async {
-                            NSApp.keyWindow?.firstResponder?.selectAll(nil)
-                        }
-                    }
-                }
-
-            // Botón de limpiar
-            if !text.isEmpty && isEditing {
-                Button(action: { text = "" }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-            }
+    func updateNSView(_ textField: NSTextField, context: Context) {
+        if textField.stringValue != text {
+            textField.stringValue = text
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color(NSColor.textBackgroundColor))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(isFocused ? Color.accentColor : Color.clear, lineWidth: 2)
-                )
-        )
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: URLTextField
+
+        init(_ parent: URLTextField) {
+            self.parent = parent
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField else { return }
+            parent.text = textField.stringValue
+        }
+
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            parent.isEditing = true
+        }
+
+        func controlTextDidEndEditing(_ obj: Notification) {
+            parent.isEditing = false
+        }
+
+        func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+            if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+                parent.onSubmit()
+                return true
+            }
+            return false
+        }
     }
 }
 
@@ -223,4 +228,3 @@ struct ActionButtons: View {
         }
     }
 }
-
