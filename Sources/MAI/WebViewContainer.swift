@@ -170,6 +170,14 @@ struct WebViewRepresentable: NSViewRepresentable {
             browserState.isLoading = false
             tab.updateFromWebView(webView)
 
+            // Registrar en historial
+            if let url = webView.url?.absoluteString {
+                HistoryManager.shared.recordVisit(
+                    url: url,
+                    title: webView.title ?? url
+                )
+            }
+
             // Obtener favicon
             fetchFavicon(for: webView)
         }

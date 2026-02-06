@@ -114,11 +114,92 @@ struct BookmarkRow: View {
 }
 
 struct HistorySection: View {
+    @EnvironmentObject var browserState: BrowserState
+    @ObservedObject private var historyManager = HistoryManager.shared
+    @State private var searchText = ""
+
     var body: some View {
-        Section("Hoy") {
+        // Búsqueda
+        TextField("Buscar historial...", text: $searchText)
+            .textFieldStyle(.roundedBorder)
+            .padding(.horizontal, 4)
+
+        let groupedHistory = historyManager.getGroupedHistory()
+
+        if groupedHistory.isEmpty {
             Text("Sin historial")
                 .foregroundColor(.secondary)
+                .padding()
+        } else {
+            ForEach(groupedHistory, id: \.date) { group in
+                Section(group.date) {
+                    ForEach(filteredEntries(group.entries)) { entry in
+                        HistoryRow(entry: entry)
+                    }
+                }
+            }
+
+            // Botón para limpiar
+            Section {
+                Button(action: { historyManager.clearAll() }) {
+                    HStack {
+                        Image(systemName: "trash")
+                        Text("Limpiar historial")
+                    }
+                    .foregroundColor(.red)
+                }
+                .buttonStyle(.plain)
+            }
         }
+    }
+
+    private func filteredEntries(_ entries: [HistoryEntry]) -> [HistoryEntry] {
+        guard !searchText.isEmpty else { return entries }
+        let query = searchText.lowercased()
+        return entries.filter {
+            $0.title.lowercased().contains(query) ||
+            $0.url.lowercased().contains(query)
+        }
+    }
+}
+
+struct HistoryRow: View {
+    let entry: HistoryEntry
+    @EnvironmentObject var browserState: BrowserState
+
+    private var timeString: String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: entry.visitDate)
+    }
+
+    var body: some View {
+        Button(action: { browserState.navigate(to: entry.url) }) {
+            HStack {
+                Image(systemName: "clock")
+                    .foregroundColor(.secondary)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(entry.title)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+
+                    Text(entry.url)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
+                Spacer()
+
+                Text(timeString)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 
