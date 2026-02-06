@@ -1,6 +1,30 @@
 import SwiftUI
 import AppKit
 
+/// NSTextField que acepta first responder correctamente
+class FocusableTextField: NSTextField {
+    override var acceptsFirstResponder: Bool { true }
+
+    override func becomeFirstResponder() -> Bool {
+        let success = super.becomeFirstResponder()
+        if success {
+            // Asegurar que la ventana sea key
+            self.window?.makeKey()
+            // Seleccionar todo el texto al enfocar
+            if let editor = self.currentEditor() {
+                editor.selectAll(nil)
+            }
+        }
+        return success
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        super.mouseDown(with: event)
+        // Forzar foco al hacer clic
+        self.window?.makeFirstResponder(self)
+    }
+}
+
 /// Barra de direcciones del navegador
 struct AddressBar: View {
     @EnvironmentObject var browserState: BrowserState
@@ -104,15 +128,20 @@ struct URLTextField: NSViewRepresentable {
     let onSubmit: () -> Void
 
     func makeNSView(context: Context) -> NSTextField {
-        let textField = NSTextField()
+        let textField = FocusableTextField()
         textField.delegate = context.coordinator
         textField.placeholderString = "Buscar o escribir dirección"
         textField.font = .systemFont(ofSize: 13)
-        textField.isBordered = false
-        textField.backgroundColor = .clear
-        textField.focusRingType = .none
+        textField.isBordered = true
+        textField.bezelStyle = .roundedBezel
+        textField.backgroundColor = NSColor.textBackgroundColor
+        textField.focusRingType = .default
+        textField.isEditable = true
+        textField.isSelectable = true
+        textField.allowsEditingTextAttributes = false
         textField.cell?.isScrollable = true
         textField.cell?.wraps = false
+        textField.cell?.usesSingleLineMode = true
         textField.lineBreakMode = .byTruncatingTail
         return textField
     }
