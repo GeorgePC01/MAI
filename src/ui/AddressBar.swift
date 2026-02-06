@@ -1,27 +1,66 @@
 import SwiftUI
 import AppKit
 
-/// NSTextField que acepta first responder correctamente
+/// NSTextField que maneja correctamente el foco cuando hay WKWebView
 class FocusableTextField: NSTextField {
     override var acceptsFirstResponder: Bool { true }
 
     override func becomeFirstResponder() -> Bool {
-        let success = super.becomeFirstResponder()
-        if success {
-            // Asegurar que la ventana sea key
-            self.window?.makeKey()
-            // Seleccionar todo el texto al enfocar
-            if let editor = self.currentEditor() {
-                editor.selectAll(nil)
+        let result = super.becomeFirstResponder()
+        if result {
+            // Asegurar que el field editor reciba eventos correctamente
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                self.window?.makeKey()
+                if let editor = self.currentEditor() as? NSTextView {
+                    // Seleccionar todo el texto
+                    let range = NSRange(location: 0, length: editor.string.count)
+                    editor.selectedRanges = [NSValue(range: range)]
+                }
             }
         }
-        return success
+        return result
     }
 
     override func mouseDown(with event: NSEvent) {
+        // CRÍTICO: Primero resignar cualquier first responder (especialmente WKWebView)
+        if let window = self.window {
+            window.makeFirstResponder(nil)
+        }
+
         super.mouseDown(with: event)
-        // Forzar foco al hacer clic
-        self.window?.makeFirstResponder(self)
+
+        // Forzar foco después del click con delay
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.window?.makeFirstResponder(self)
+        }
+    }
+
+    // Interceptar key equivalents para asegurar que lleguen correctamente
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if event.modifierFlags.contains(.command) {
+            let chars = event.charactersIgnoringModifiers ?? ""
+            switch chars.lowercased() {
+            case "c":
+                if NSApp.sendAction(#selector(NSText.copy(_:)), to: nil, from: self) { return true }
+            case "v":
+                if NSApp.sendAction(#selector(NSText.paste(_:)), to: nil, from: self) { return true }
+            case "x":
+                if NSApp.sendAction(#selector(NSText.cut(_:)), to: nil, from: self) { return true }
+            case "a":
+                if NSApp.sendAction(#selector(NSText.selectAll(_:)), to: nil, from: self) { return true }
+            case "z":
+                if event.modifierFlags.contains(.shift) {
+                    if NSApp.sendAction(Selector(("redo:")), to: nil, from: self) { return true }
+                } else {
+                    if NSApp.sendAction(Selector(("undo:")), to: nil, from: self) { return true }
+                }
+            default:
+                break
+            }
+        }
+        return super.performKeyEquivalent(with: event)
     }
 }
 
@@ -36,11 +75,25 @@ struct AddressBar: View {
             // Botones de navegación
             NavigationButtons()
 
-            // Campo de URL
-            URLTextField(
-                text: $urlText,
-                isEditing: $isEditing,
-                onSubmit: navigateToURL
+            // Campo de URL con fondo
+            HStack(spacing: 8) {
+                SecurityIndicator(url: urlText)
+
+                URLTextField(
+                    text: $urlText,
+                    isEditing: $isEditing,
+                    onSubmit: navigateToURL
+                )
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(NSColor.textBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isEditing ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: isEditing ? 2 : 1)
+                    )
             )
 
             // Botones de acción
@@ -71,7 +124,6 @@ struct NavigationButtons: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            // Atrás
             Button(action: { browserState.goBack() }) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 14, weight: .medium))
@@ -80,7 +132,6 @@ struct NavigationButtons: View {
             .disabled(!(browserState.currentTab?.canGoBack ?? false))
             .help("Atrás (Cmd+[)")
 
-            // Adelante
             Button(action: { browserState.goForward() }) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 14, weight: .medium))
@@ -89,7 +140,6 @@ struct NavigationButtons: View {
             .disabled(!(browserState.currentTab?.canGoForward ?? false))
             .help("Adelante (Cmd+])")
 
-            // Recargar / Detener
             Button(action: {
                 if browserState.isLoading {
                     browserState.stopLoading()
@@ -121,7 +171,7 @@ struct NavigationButtonStyle: ButtonStyle {
     }
 }
 
-/// Campo de URL usando NSTextField nativo para mejor input handling
+/// Campo de URL usando NSTextField nativo
 struct URLTextField: NSViewRepresentable {
     @Binding var text: String
     @Binding var isEditing: Bool
@@ -132,17 +182,20 @@ struct URLTextField: NSViewRepresentable {
         textField.delegate = context.coordinator
         textField.placeholderString = "Buscar o escribir dirección"
         textField.font = .systemFont(ofSize: 13)
-        textField.isBordered = true
-        textField.bezelStyle = .roundedBezel
-        textField.backgroundColor = NSColor.textBackgroundColor
-        textField.focusRingType = .default
+        textField.isBordered = false
+        textField.drawsBackground = false
+        textField.backgroundColor = .clear
+        textField.focusRingType = .none
         textField.isEditable = true
         textField.isSelectable = true
-        textField.allowsEditingTextAttributes = false
         textField.cell?.isScrollable = true
         textField.cell?.wraps = false
         textField.cell?.usesSingleLineMode = true
         textField.lineBreakMode = .byTruncatingTail
+
+        // Importante: Permitir que el field editor maneje los eventos
+        textField.allowsEditingTextAttributes = false
+
         return textField
     }
 
@@ -165,20 +218,31 @@ struct URLTextField: NSViewRepresentable {
 
         func controlTextDidChange(_ obj: Notification) {
             guard let textField = obj.object as? NSTextField else { return }
-            parent.text = textField.stringValue
+            DispatchQueue.main.async {
+                self.parent.text = textField.stringValue
+            }
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
-            parent.isEditing = true
+            DispatchQueue.main.async {
+                self.parent.isEditing = true
+            }
         }
 
         func controlTextDidEndEditing(_ obj: Notification) {
-            parent.isEditing = false
+            DispatchQueue.main.async {
+                self.parent.isEditing = false
+            }
         }
 
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 parent.onSubmit()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                // Escape - quitar foco
+                control.window?.makeFirstResponder(nil)
                 return true
             }
             return false
@@ -195,18 +259,19 @@ struct SecurityIndicator: View {
     }
 
     private var isLocal: Bool {
-        url.hasPrefix("about:") || url.hasPrefix("file://")
+        url.hasPrefix("about:") || url.hasPrefix("file://") || url.isEmpty
     }
 
     var body: some View {
         Image(systemName: iconName)
             .font(.system(size: 12))
             .foregroundColor(iconColor)
+            .frame(width: 16)
     }
 
     private var iconName: String {
         if isLocal {
-            return "doc"
+            return "magnifyingglass"
         } else if isSecure {
             return "lock.fill"
         } else {
@@ -231,7 +296,6 @@ struct ActionButtons: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            // Agregar a favoritos
             Button(action: { /* TODO: Implementar */ }) {
                 Image(systemName: "star")
                     .font(.system(size: 14))
@@ -239,7 +303,6 @@ struct ActionButtons: View {
             .buttonStyle(NavigationButtonStyle())
             .help("Agregar a favoritos")
 
-            // Compartir
             Button(action: { /* TODO: Implementar */ }) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 14))
@@ -247,7 +310,6 @@ struct ActionButtons: View {
             .buttonStyle(NavigationButtonStyle())
             .help("Compartir")
 
-            // Sidebar toggle
             Button(action: { browserState.showSidebar.toggle() }) {
                 Image(systemName: "sidebar.left")
                     .font(.system(size: 14))
