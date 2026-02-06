@@ -10,10 +10,9 @@ struct MAIApp: App {
         WindowGroup {
             BrowserView()
                 .environmentObject(browserState)
-                .frame(minWidth: 800, idealWidth: 1200, minHeight: 600, idealHeight: 800)
+                .frame(minWidth: 800, minHeight: 600)
         }
         .windowStyle(.automatic)
-        .windowResizability(.contentSize)
         .commands {
             // Comandos de menú personalizados
             CommandGroup(replacing: .newItem) {
@@ -114,19 +113,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Activar la aplicación
         NSApp.activate(ignoringOtherApps: true)
 
-        // Configurar la ventana principal
+        // Asegurar que la ventana tome foco
         DispatchQueue.main.async {
             if let window = NSApp.windows.first {
-                // Permitir redimensionar y maximizar
-                window.styleMask.insert([.resizable, .miniaturizable, .closable, .titled])
-
-                // Habilitar zoom (maximizar con botón verde)
-                window.collectionBehavior.insert(.fullScreenPrimary)
-
-                // Establecer tamaño mínimo
-                window.minSize = NSSize(width: 800, height: 600)
-
-                // Tomar foco
                 window.makeKeyAndOrderFront(nil)
                 window.orderFrontRegardless()
             }
