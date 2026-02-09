@@ -2,15 +2,22 @@ import SwiftUI
 import WebKit
 
 /// Container que envuelve WKWebView para uso en SwiftUI
+/// Mantiene todas las WebViews vivas y solo muestra la actual
 struct WebViewContainer: View {
     @EnvironmentObject var browserState: BrowserState
 
     var body: some View {
-        if let tab = browserState.currentTab {
-            WebViewRepresentable(tab: tab, browserState: browserState)
-                .id(tab.id)  // Forzar recreación cuando cambia tab
-        } else {
-            EmptyStateView()
+        ZStack {
+            if browserState.tabs.isEmpty {
+                EmptyStateView()
+            } else {
+                // Mantener todas las WebViews vivas, solo mostrar la actual
+                ForEach(browserState.tabs) { tab in
+                    WebViewRepresentable(tab: tab, browserState: browserState)
+                        .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
+                        .allowsHitTesting(tab.id == browserState.currentTab?.id)
+                }
+            }
         }
     }
 }
