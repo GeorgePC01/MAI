@@ -198,6 +198,21 @@ struct ActionButtons: View {
             }
             .buttonStyle(NavigationButtonStyle())
             .help("Mostrar/ocultar barra lateral (Cmd+Shift+S)")
+
+            Divider()
+                .frame(height: 20)
+
+            Button(action: { openSettingsWindow() }) {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 14))
+            }
+            .buttonStyle(NavigationButtonStyle())
+            .help("Configuración (Cmd+,)")
         }
+    }
+
+    private func openSettingsWindow() {
+        // Método compatible con macOS 13+
+        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
     }
 }

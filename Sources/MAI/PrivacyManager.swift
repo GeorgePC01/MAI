@@ -228,14 +228,43 @@ class PrivacyManager: ObservableObject {
 
     /// Estadísticas de bloqueo
     @Published var blockedRequestsCount: Int = 0
+    @Published var blockedRequests: [BlockedRequest] = []
 
-    func recordBlockedRequest() {
+    struct BlockedRequest: Identifiable {
+        let id = UUID()
+        let url: String
+        let domain: String
+        let timestamp: Date
+        let type: BlockType
+
+        enum BlockType: String {
+            case tracker = "Rastreador"
+            case ad = "Anuncio"
+            case thirdPartyCookie = "Cookie terceros"
+        }
+    }
+
+    func recordBlockedRequest(url: URL, type: BlockedRequest.BlockType = .tracker) {
         DispatchQueue.main.async {
             self.blockedRequestsCount += 1
+
+            let request = BlockedRequest(
+                url: url.absoluteString,
+                domain: url.host ?? "desconocido",
+                timestamp: Date(),
+                type: type
+            )
+
+            // Mantener solo los últimos 100 para no usar mucha RAM
+            self.blockedRequests.insert(request, at: 0)
+            if self.blockedRequests.count > 100 {
+                self.blockedRequests = Array(self.blockedRequests.prefix(100))
+            }
         }
     }
 
     func resetBlockedCount() {
         blockedRequestsCount = 0
+        blockedRequests.removeAll()
     }
 }

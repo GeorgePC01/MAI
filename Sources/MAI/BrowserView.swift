@@ -209,6 +209,7 @@ struct DownloadsSection: View {
 struct StatusBar: View {
     @EnvironmentObject var browserState: BrowserState
     @ObservedObject private var privacyManager = PrivacyManager.shared
+    @State private var showBlockedList = false
 
     var body: some View {
         HStack {
@@ -221,15 +222,21 @@ struct StatusBar: View {
                     .foregroundColor(.secondary)
             }
 
-            // Contador de bloqueos (si hay)
+            // Contador de bloqueos (si hay) - clickeable
             if privacyManager.blockedRequestsCount > 0 {
-                HStack(spacing: 4) {
-                    Image(systemName: "shield.checkered")
-                        .foregroundColor(.green)
-                    Text("\(privacyManager.blockedRequestsCount) bloqueados")
+                Button(action: { showBlockedList.toggle() }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "shield.checkered")
+                            .foregroundColor(.green)
+                        Text("\(privacyManager.blockedRequestsCount) bloqueados")
+                    }
+                    .font(.caption)
+                    .foregroundColor(.green)
                 }
-                .font(.caption)
-                .foregroundColor(.green)
+                .buttonStyle(.plain)
+                .popover(isPresented: $showBlockedList) {
+                    BlockedRequestsPopover()
+                }
             }
 
             Spacer()
@@ -246,6 +253,121 @@ struct StatusBar: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
         .background(Color(NSColor.controlBackgroundColor))
+    }
+}
+
+/// Popover que muestra los elementos bloqueados
+struct BlockedRequestsPopover: View {
+    @ObservedObject private var privacyManager = PrivacyManager.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack {
+                Image(systemName: "shield.checkered")
+                    .foregroundColor(.green)
+                Text("Elementos bloqueados")
+                    .fontWeight(.semibold)
+                Spacer()
+                Text("\(privacyManager.blockedRequestsCount)")
+                    .foregroundColor(.secondary)
+            }
+            .padding()
+            .background(Color(NSColor.controlBackgroundColor))
+
+            Divider()
+
+            // Lista de bloqueados
+            if privacyManager.blockedRequests.isEmpty {
+                Text("No hay elementos bloqueados")
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 0) {
+                        ForEach(privacyManager.blockedRequests) { request in
+                            BlockedRequestRow(request: request)
+                            Divider()
+                        }
+                    }
+                }
+                .frame(maxHeight: 300)
+            }
+
+            Divider()
+
+            // Footer con botón limpiar
+            HStack {
+                Button("Limpiar lista") {
+                    privacyManager.resetBlockedCount()
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(.red)
+
+                Spacer()
+
+                Text("Solo trackers y ads")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding()
+        }
+        .frame(width: 350)
+    }
+}
+
+/// Fila individual de request bloqueado
+struct BlockedRequestRow: View {
+    let request: PrivacyManager.BlockedRequest
+
+    private var timeString: String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .short
+        return formatter.string(from: request.timestamp)
+    }
+
+    private var typeColor: Color {
+        switch request.type {
+        case .tracker: return .orange
+        case .ad: return .red
+        case .thirdPartyCookie: return .purple
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            // Icono de tipo
+            Circle()
+                .fill(typeColor)
+                .frame(width: 8, height: 8)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(request.domain)
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+
+                Text(request.url)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                Text(request.type.rawValue)
+                    .font(.system(size: 10))
+                    .foregroundColor(typeColor)
+
+                Text(timeString)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .contentShape(Rectangle())
     }
 }
 

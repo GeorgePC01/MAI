@@ -124,8 +124,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("MAI Browser iniciado")
 
-        // Configurar apariencia
-        NSApplication.shared.appearance = NSAppearance(named: .darkAqua)
+        // Seguir el tema del sistema (claro/oscuro automático)
+        // NSApplication.shared.appearance = NSAppearance(named: .darkAqua)  // Descomentar para forzar oscuro
 
         // Activar la aplicación
         NSApp.activate(ignoringOtherApps: true)

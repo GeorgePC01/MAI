@@ -158,6 +158,9 @@ struct WebViewRepresentable: NSViewRepresentable {
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsMagnification = true
 
+        // Forzar que WKWebView siga el tema del sistema (no heredar de la app)
+        webView.underPageBackgroundColor = NSColor.textBackgroundColor
+
         // User-Agent de Safari 18.2 (macOS Sequoia) para compatibilidad con Google
         // Usar formato estándar que Google reconoce
         webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15"
@@ -298,7 +301,7 @@ struct WebViewRepresentable: NSViewRepresentable {
 
             // Verificar si debe bloquearse (respeta whitelist de OAuth)
             if PrivacyManager.shared.shouldBlock(url: url) {
-                PrivacyManager.shared.recordBlockedRequest()
+                PrivacyManager.shared.recordBlockedRequest(url: url, type: .tracker)
                 print("🛡️ Bloqueado: \(url.host ?? url.absoluteString)")
                 decisionHandler(.cancel)
                 return
