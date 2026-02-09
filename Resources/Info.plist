@@ -31,7 +31,9 @@
     <key>NSBluetoothPeripheralUsageDescription</key>
     <string>MAI Browser necesita Bluetooth para autenticación con passkeys en otros dispositivos</string>
     <key>NSCameraUsageDescription</key>
-    <string>MAI Browser puede usar la cámara para autenticación biométrica</string>
+    <string>MAI Browser necesita acceso a la cámara para videollamadas y autenticación biométrica</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>MAI Browser necesita acceso al micrófono para llamadas de voz y video</string>
 
     <!-- Soporte para llaves de seguridad USB -->
     <key>com.apple.developer.web-browser</key>

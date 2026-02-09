@@ -20,8 +20,12 @@
         <string>$(AppIdentifierPrefix)com.mai.browser</string>
     </array>
 
-    <!-- Cámara (para Face ID si aplica) -->
+    <!-- Cámara (para videollamadas y Face ID) -->
     <key>com.apple.security.device.camera</key>
+    <true/>
+
+    <!-- Micrófono (para llamadas de voz/video) -->
+    <key>com.apple.security.device.audio-input</key>
     <true/>
 
     <!-- USB (para llaves de seguridad físicas como YubiKey) -->

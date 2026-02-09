@@ -565,6 +565,42 @@ struct WebViewRepresentable: NSViewRepresentable {
             }
         }
 
+        // MARK: - Media Permissions (Camera/Microphone)
+
+        /// Manejar solicitudes de permisos de cámara y micrófono
+        func webView(_ webView: WKWebView, requestMediaCapturePermissionFor origin: WKSecurityOrigin, initiatedByFrame frame: WKFrameInfo, type: WKMediaCaptureType, decisionHandler: @escaping (WKPermissionDecision) -> Void) {
+            let mediaType: String
+            switch type {
+            case .camera:
+                mediaType = "cámara"
+            case .microphone:
+                mediaType = "micrófono"
+            case .cameraAndMicrophone:
+                mediaType = "cámara y micrófono"
+            @unknown default:
+                mediaType = "dispositivo multimedia"
+            }
+
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Permiso de \(mediaType)"
+                alert.informativeText = "\(origin.host) quiere acceder a tu \(mediaType).\n\n¿Permitir acceso?"
+                alert.alertStyle = .informational
+                alert.addButton(withTitle: "Permitir")
+                alert.addButton(withTitle: "Denegar")
+
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    print("🎥 Permiso de \(mediaType) concedido a \(origin.host)")
+                    decisionHandler(.grant)
+                } else {
+                    print("🎥 Permiso de \(mediaType) denegado a \(origin.host)")
+                    decisionHandler(.deny)
+                }
+            }
+        }
+
+
         func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
             let alert = NSAlert()
             alert.messageText = "Mensaje de la página"
