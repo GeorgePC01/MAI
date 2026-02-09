@@ -51,6 +51,7 @@ struct TabBar: View {
 /// Item individual de pestaña
 struct TabItem: View {
     @ObservedObject var tab: Tab
+    @EnvironmentObject var browserState: BrowserState
     let isSelected: Bool
     let isHovered: Bool
     let onSelect: () -> Void
@@ -58,8 +59,13 @@ struct TabItem: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Favicon
-            if let favicon = tab.favicon {
+            // Icono de suspendida o favicon
+            if tab.isSuspended {
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(.orange)
+                    .frame(width: 16, height: 16)
+            } else if let favicon = tab.favicon {
                 Image(nsImage: favicon)
                     .resizable()
                     .frame(width: 16, height: 16)
@@ -78,6 +84,7 @@ struct TabItem: View {
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .frame(maxWidth: 150, alignment: .leading)
+                .opacity(tab.isSuspended ? 0.6 : 1.0)
 
             Spacer(minLength: 0)
 
@@ -100,10 +107,37 @@ struct TabItem: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(minWidth: 120, maxWidth: 200, minHeight: 30)
-        .background(TabItemBackground(isSelected: isSelected, isHovered: isHovered))
+        .background(TabItemBackground(isSelected: isSelected, isHovered: isHovered, isSuspended: tab.isSuspended))
         .cornerRadius(8)
         .onTapGesture {
+            // Si está suspendida, restaurar al hacer clic
+            if tab.isSuspended {
+                browserState.resumeTab(tab)
+            }
             onSelect()
+        }
+        .contextMenu {
+            if tab.isSuspended {
+                Button(action: { browserState.resumeTab(tab) }) {
+                    Label("Restaurar Tab", systemImage: "arrow.clockwise")
+                }
+            } else {
+                Button(action: { browserState.suspendTab(tab) }) {
+                    Label("Suspender Tab", systemImage: "moon.zzz")
+                }
+            }
+
+            Divider()
+
+            Button(action: { browserState.suspendInactiveTabs() }) {
+                Label("Suspender Otras Tabs", systemImage: "moon.zzz.fill")
+            }
+
+            Divider()
+
+            Button(action: onClose) {
+                Label("Cerrar Tab", systemImage: "xmark")
+            }
         }
     }
 }
@@ -112,15 +146,23 @@ struct TabItem: View {
 struct TabItemBackground: View {
     let isSelected: Bool
     let isHovered: Bool
+    var isSuspended: Bool = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: 8)
             .fill(backgroundColor)
+            .overlay(
+                // Borde naranja para tabs suspendidas
+                RoundedRectangle(cornerRadius: 8)
+                    .strokeBorder(Color.orange.opacity(isSuspended ? 0.5 : 0), lineWidth: 1)
+            )
     }
 
     private var backgroundColor: Color {
         if isSelected {
-            return Color(NSColor.controlBackgroundColor)
+            return isSuspended
+                ? Color.orange.opacity(0.15)
+                : Color(NSColor.controlBackgroundColor)
         } else if isHovered {
             return Color.gray.opacity(0.15)
         } else {

@@ -3,6 +3,7 @@ import WebKit
 
 /// Container que envuelve WKWebView para uso en SwiftUI
 /// Mantiene todas las WebViews vivas y solo muestra la actual
+/// Tabs suspendidas muestran un snapshot en lugar de WebView
 struct WebViewContainer: View {
     @EnvironmentObject var browserState: BrowserState
 
@@ -13,12 +14,80 @@ struct WebViewContainer: View {
             } else {
                 // Mantener todas las WebViews vivas, solo mostrar la actual
                 ForEach(browserState.tabs) { tab in
-                    WebViewRepresentable(tab: tab, browserState: browserState)
-                        .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
-                        .allowsHitTesting(tab.id == browserState.currentTab?.id)
+                    if tab.isSuspended {
+                        // Tab suspendida: mostrar snapshot
+                        SuspendedTabView(tab: tab)
+                            .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
+                            .allowsHitTesting(tab.id == browserState.currentTab?.id)
+                    } else {
+                        // Tab activa: mostrar WebView
+                        WebViewRepresentable(tab: tab, browserState: browserState)
+                            .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
+                            .allowsHitTesting(tab.id == browserState.currentTab?.id)
+                    }
                 }
             }
         }
+    }
+}
+
+/// Vista para tabs suspendidas - muestra snapshot con opción de restaurar
+struct SuspendedTabView: View {
+    @ObservedObject var tab: Tab
+    @EnvironmentObject var browserState: BrowserState
+
+    var body: some View {
+        ZStack {
+            // Fondo
+            Color(NSColor.textBackgroundColor)
+
+            // Snapshot si existe
+            if let snapshot = tab.suspendedSnapshot {
+                Image(nsImage: snapshot)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .opacity(0.5)
+                    .blur(radius: 2)
+            }
+
+            // Overlay con mensaje
+            VStack(spacing: 16) {
+                Image(systemName: "moon.zzz.fill")
+                    .font(.system(size: 48))
+                    .foregroundColor(.secondary)
+
+                Text("Tab Suspendida")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                Text(tab.title)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+
+                Text("💾 RAM liberada: ~70 MB")
+                    .font(.caption)
+                    .foregroundColor(.green)
+
+                Button(action: { browserState.resumeTab(tab) }) {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Restaurar Tab")
+                    }
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 10)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+            .padding(40)
+            .background(
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color(NSColor.windowBackgroundColor).opacity(0.95))
+                    .shadow(radius: 10)
+            )
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 

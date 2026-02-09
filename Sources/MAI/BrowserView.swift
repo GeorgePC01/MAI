@@ -309,13 +309,28 @@ struct StatusBar: View {
                 }
             }
 
+            // Tabs suspendidas (si hay)
+            if browserState.suspendedTabsCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "moon.zzz.fill")
+                        .foregroundColor(.orange)
+                    Text("\(browserState.suspendedTabsCount) suspendidas")
+                    Text("(-\(Int(browserState.estimatedRAMSaved)) MB)")
+                        .foregroundColor(.green)
+                }
+                .font(.caption)
+            }
+
             Spacer()
 
             // Estadísticas
             HStack(spacing: 16) {
                 Label(String(format: "%.0f MB", browserState.memoryUsage), systemImage: "memorychip")
                 Label(String(format: "%.1f%%", browserState.cpuUsage), systemImage: "cpu")
-                Label("\(browserState.tabs.count) tabs", systemImage: "square.on.square")
+
+                // Tabs activas vs total
+                let activeTabs = browserState.tabs.count - browserState.suspendedTabsCount
+                Label("\(activeTabs)/\(browserState.tabs.count) tabs", systemImage: "square.on.square")
             }
             .font(.caption)
             .foregroundColor(.secondary)

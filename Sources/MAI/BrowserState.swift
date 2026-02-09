@@ -143,6 +143,66 @@ class BrowserState: ObservableObject {
         navigate(to: "https://www.google.com")
     }
 
+    // MARK: - Tab Suspension
+
+    /// Suspende una tab para liberar memoria
+    func suspendTab(_ tab: Tab) {
+        guard !tab.isSuspended, let webView = tab.webView else { return }
+
+        // 1. Capturar screenshot
+        let config = WKSnapshotConfiguration()
+        webView.takeSnapshot(with: config) { [weak tab] image, _ in
+            DispatchQueue.main.async {
+                tab?.suspendedSnapshot = image
+            }
+        }
+
+        // 2. Guardar scroll position
+        webView.evaluateJavaScript("JSON.stringify({x: window.scrollX, y: window.scrollY})") { [weak tab] result, _ in
+            if let json = result as? String,
+               let data = json.data(using: .utf8),
+               let pos = try? JSONDecoder().decode([String: CGFloat].self, from: data) {
+                tab?.scrollPosition = CGPoint(x: pos["x"] ?? 0, y: pos["y"] ?? 0)
+            }
+        }
+
+        // 3. Marcar como suspendida (la WebView se liberará)
+        tab.isSuspended = true
+
+        print("💤 Tab suspendida: \(tab.title) - RAM liberada")
+    }
+
+    /// Restaura una tab suspendida
+    func resumeTab(_ tab: Tab) {
+        guard tab.isSuspended else { return }
+
+        tab.isSuspended = false
+        tab.suspendedSnapshot = nil
+
+        // La WebView se recreará automáticamente en WebViewContainer
+        // y cargará la URL guardada
+
+        print("⏰ Tab restaurada: \(tab.title)")
+    }
+
+    /// Suspende todas las tabs excepto la actual
+    func suspendInactiveTabs() {
+        for tab in tabs where tab.id != currentTab?.id && !tab.isSuspended {
+            suspendTab(tab)
+        }
+    }
+
+    /// Cuenta tabs suspendidas
+    var suspendedTabsCount: Int {
+        tabs.filter { $0.isSuspended }.count
+    }
+
+    /// RAM estimada ahorrada por suspensión
+    var estimatedRAMSaved: Double {
+        // ~70 MB promedio por tab suspendida
+        Double(suspendedTabsCount) * 70.0
+    }
+
     // MARK: - Find in Page
 
     @Published var findQuery: String = ""
@@ -389,10 +449,26 @@ class Tab: ObservableObject, Identifiable {
     @Published var canGoForward: Bool = false
     @Published var zoomLevel: Double = 1.0
 
+    // Tab Suspension
+    @Published var isSuspended: Bool = false
+    @Published var suspendedSnapshot: NSImage?
+    @Published var lastInteraction: Date = Date()
+    var scrollPosition: CGPoint = .zero
+
     weak var webView: WKWebView?
 
     init(url: String = "about:blank") {
         self.url = url
+    }
+
+    /// Registra interacción del usuario (para ML futuro)
+    func recordInteraction() {
+        lastInteraction = Date()
+    }
+
+    /// Tiempo desde última interacción
+    var timeSinceLastInteraction: TimeInterval {
+        Date().timeIntervalSince(lastInteraction)
     }
 
     func navigate(to urlString: String) {
