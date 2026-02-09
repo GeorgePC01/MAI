@@ -297,10 +297,11 @@ struct WebViewRepresentable: NSViewRepresentable {
     }
 
     /// Coordinator para manejar delegados de WKWebView
-    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
         var tab: Tab
         var browserState: BrowserState
         private var observations: [NSKeyValueObservation] = []
+        private var activeDownloads: [WKDownload: URL] = [:]
 
         init(tab: Tab, browserState: BrowserState) {
             self.tab = tab
@@ -598,6 +599,122 @@ struct WebViewRepresentable: NSViewRepresentable {
                 completionHandler(textField.stringValue)
             } else {
                 completionHandler(nil)
+            }
+        }
+
+        // MARK: - Downloads
+
+        /// Manejar respuestas de navegación que deberían ser descargas
+        func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
+            // Verificar si es un archivo descargable
+            if let mimeType = navigationResponse.response.mimeType {
+                let downloadableMimeTypes = [
+                    "application/octet-stream",
+                    "application/zip",
+                    "application/pdf",
+                    "application/x-tar",
+                    "application/gzip",
+                    "application/x-gzip",
+                    "application/x-compressed",
+                    "application/x-download",
+                    "application/force-download",
+                    "application/json",
+                    "text/plain",
+                    "text/csv"
+                ]
+
+                // Si el Content-Disposition indica descarga o es un tipo descargable
+                let isAttachment = (navigationResponse.response as? HTTPURLResponse)?
+                    .value(forHTTPHeaderField: "Content-Disposition")?
+                    .contains("attachment") ?? false
+
+                let isDownloadableMime = downloadableMimeTypes.contains(mimeType) ||
+                                         mimeType.hasPrefix("application/") && !mimeType.contains("html")
+
+                if isAttachment || (isDownloadableMime && !navigationResponse.canShowMIMEType) {
+                    // Iniciar descarga
+                    decisionHandler(.download)
+                    return
+                }
+            }
+
+            decisionHandler(.allow)
+        }
+
+        /// Cuando se inicia una descarga desde navegación
+        func webView(_ webView: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) {
+            download.delegate = self
+            print("📥 Descarga iniciada desde navegación")
+        }
+
+        /// Cuando se inicia una descarga desde acción (click en link de descarga)
+        func webView(_ webView: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) {
+            download.delegate = self
+            print("📥 Descarga iniciada desde acción")
+        }
+
+        // MARK: - WKDownloadDelegate
+
+        func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
+            // Mostrar diálogo de guardar archivo
+            DispatchQueue.main.async {
+                let savePanel = NSSavePanel()
+                savePanel.nameFieldStringValue = suggestedFilename
+                savePanel.canCreateDirectories = true
+
+                // Intentar detectar la extensión
+                if let ext = suggestedFilename.components(separatedBy: ".").last {
+                    savePanel.allowedContentTypes = [.init(filenameExtension: ext) ?? .data]
+                }
+
+                if savePanel.runModal() == .OK, let url = savePanel.url {
+                    self.activeDownloads[download] = url
+                    print("📥 Guardando en: \(url.path)")
+                    completionHandler(url)
+                } else {
+                    print("📥 Descarga cancelada por usuario")
+                    completionHandler(nil)
+                }
+            }
+        }
+
+        func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+            activeDownloads.removeValue(forKey: download)
+            print("❌ Error en descarga: \(error.localizedDescription)")
+
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Error de descarga"
+                alert.informativeText = error.localizedDescription
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+
+        func downloadDidFinish(_ download: WKDownload) {
+            if let url = activeDownloads.removeValue(forKey: download) {
+                print("✅ Descarga completada: \(url.lastPathComponent)")
+
+                DispatchQueue.main.async {
+                    // Mostrar notificación de éxito
+                    let alert = NSAlert()
+                    alert.messageText = "Descarga completada"
+                    alert.informativeText = url.lastPathComponent
+                    alert.alertStyle = .informational
+                    alert.addButton(withTitle: "Abrir")
+                    alert.addButton(withTitle: "Mostrar en Finder")
+                    alert.addButton(withTitle: "OK")
+
+                    let response = alert.runModal()
+                    if response == .alertFirstButtonReturn {
+                        // Abrir archivo
+                        NSWorkspace.shared.open(url)
+                    } else if response == .alertSecondButtonReturn {
+                        // Mostrar en Finder
+                        NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: url.deletingLastPathComponent().path)
+                    }
+                }
             }
         }
 
