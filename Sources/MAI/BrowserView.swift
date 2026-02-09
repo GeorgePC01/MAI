@@ -79,30 +79,94 @@ struct SidebarView: View {
 }
 
 struct BookmarksSection: View {
+    @EnvironmentObject var browserState: BrowserState
+    @ObservedObject private var bookmarksManager = BookmarksManager.shared
+    @State private var searchText = ""
+
     var body: some View {
-        Section("Favoritos") {
-            BookmarkRow(title: "Google", url: "https://google.com")
-            BookmarkRow(title: "GitHub", url: "https://github.com")
-            BookmarkRow(title: "Stack Overflow", url: "https://stackoverflow.com")
+        // Búsqueda
+        TextField("Buscar favoritos...", text: $searchText)
+            .textFieldStyle(.roundedBorder)
+            .padding(.horizontal, 4)
+
+        let filteredBookmarks = searchText.isEmpty
+            ? bookmarksManager.bookmarks
+            : bookmarksManager.search(query: searchText)
+
+        if filteredBookmarks.isEmpty {
+            Text("Sin favoritos")
+                .foregroundColor(.secondary)
+                .padding()
+        } else {
+            // Carpetas
+            ForEach(bookmarksManager.folders, id: \.self) { folder in
+                Section(folder) {
+                    ForEach(bookmarksManager.bookmarks(in: folder)) { bookmark in
+                        BookmarkRow(bookmark: bookmark)
+                    }
+                }
+            }
+
+            // Favoritos sin carpeta
+            Section("Favoritos") {
+                ForEach(filteredBookmarks.filter { $0.folder == nil }) { bookmark in
+                    BookmarkRow(bookmark: bookmark)
+                }
+            }
         }
     }
 }
 
 struct BookmarkRow: View {
-    let title: String
-    let url: String
+    let bookmark: Bookmark
     @EnvironmentObject var browserState: BrowserState
+    @ObservedObject private var bookmarksManager = BookmarksManager.shared
+    @State private var showingDeleteAlert = false
 
     var body: some View {
-        Button(action: { browserState.navigate(to: url) }) {
+        Button(action: { browserState.navigate(to: bookmark.url) }) {
             HStack {
                 Image(systemName: "star.fill")
                     .foregroundColor(.yellow)
-                Text(title)
+                    .frame(width: 16)
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(bookmark.title)
+                        .lineLimit(1)
+
+                    Text(bookmark.url)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+
                 Spacer()
             }
         }
         .buttonStyle(.plain)
+        .contextMenu {
+            Button("Abrir") {
+                browserState.navigate(to: bookmark.url)
+            }
+
+            Button("Abrir en nueva pestaña") {
+                browserState.createTab(url: bookmark.url)
+            }
+
+            Divider()
+
+            Button("Copiar URL") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(bookmark.url, forType: .string)
+            }
+
+            Divider()
+
+            Button("Eliminar", role: .destructive) {
+                bookmarksManager.removeBookmark(bookmark)
+            }
+        }
     }
 }
 

@@ -175,17 +175,28 @@ struct SecurityIndicator: View {
 /// Botones de acción (compartir, favoritos, etc.)
 struct ActionButtons: View {
     @EnvironmentObject var browserState: BrowserState
+    @ObservedObject private var bookmarksManager = BookmarksManager.shared
+
+    private var isCurrentPageBookmarked: Bool {
+        guard let url = browserState.currentTab?.url, !url.isEmpty, url != "about:blank" else {
+            return false
+        }
+        return bookmarksManager.isBookmarked(url: url)
+    }
 
     var body: some View {
         HStack(spacing: 4) {
-            Button(action: { /* TODO: Implementar */ }) {
-                Image(systemName: "star")
+            // Botón de favoritos (estrella)
+            Button(action: { toggleBookmark() }) {
+                Image(systemName: isCurrentPageBookmarked ? "star.fill" : "star")
                     .font(.system(size: 14))
+                    .foregroundColor(isCurrentPageBookmarked ? .yellow : .primary)
             }
             .buttonStyle(NavigationButtonStyle())
-            .help("Agregar a favoritos")
+            .help(isCurrentPageBookmarked ? "Quitar de favoritos" : "Agregar a favoritos")
+            .disabled(browserState.currentTab?.url.isEmpty ?? true)
 
-            Button(action: { /* TODO: Implementar */ }) {
+            Button(action: { shareCurrentPage() }) {
                 Image(systemName: "square.and.arrow.up")
                     .font(.system(size: 14))
             }
@@ -198,6 +209,25 @@ struct ActionButtons: View {
             }
             .buttonStyle(NavigationButtonStyle())
             .help("Mostrar/ocultar barra lateral (Cmd+Shift+S)")
+        }
+    }
+
+    private func toggleBookmark() {
+        guard let tab = browserState.currentTab,
+              !tab.url.isEmpty,
+              tab.url != "about:blank" else { return }
+
+        bookmarksManager.toggleBookmark(url: tab.url, title: tab.title)
+    }
+
+    private func shareCurrentPage() {
+        guard let tab = browserState.currentTab,
+              let url = URL(string: tab.url) else { return }
+
+        let picker = NSSharingServicePicker(items: [url])
+        if let window = NSApp.keyWindow,
+           let contentView = window.contentView {
+            picker.show(relativeTo: .zero, of: contentView, preferredEdge: .minY)
         }
     }
 }

@@ -102,6 +102,17 @@ struct MAIApp: App {
                     browserState.showBookmarks()
                 }
                 .keyboardShortcut("b", modifiers: .command)
+
+                Divider()
+
+                Button("Agregar a Favoritos") {
+                    if let tab = browserState.currentTab,
+                       !tab.url.isEmpty,
+                       tab.url != "about:blank" {
+                        BookmarksManager.shared.toggleBookmark(url: tab.url, title: tab.title)
+                    }
+                }
+                .keyboardShortcut("d", modifiers: .command)
             }
         }
 
