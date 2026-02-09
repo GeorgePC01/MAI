@@ -78,7 +78,8 @@
 - [x] CPU monitoring básico
 - [ ] Startup optimization
 - [ ] Lazy loading de tabs
-- [ ] Tab suspension automática
+- [x] Tab suspension manual (v0.2.1)
+- [ ] Tab suspension automática (ML)
 
 ### Networking
 - [ ] HTTP/3 support

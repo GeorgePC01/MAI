@@ -240,12 +240,19 @@ Complejidad:  Baja
 Valor:        Reduce RAM
 RAM extra:    0
 Complejidad:  Baja
+Estado:       ✅ Fase 1 completada (manual)
 ```
 
-**Método:**
+**Fase 1 (v0.2.1) - Completada:**
+- Suspender tabs manualmente (click derecho)
+- Suspender todas las tabs inactivas
+- Restaurar al hacer clic
+- Mostrar snapshot y RAM ahorrada
+
+**Fase 2 (pendiente) - ML automático:**
 - Suspender tabs sin uso >10 minutos
 - Priorizar tab activa
-- Restaurar al hacer clic
+- Aprender patrones del usuario
 
 ---
 
@@ -276,12 +283,13 @@ Complejidad:  Baja
 
 ### Fase Siguiente → Diferenciación
 
-| Orden | Función | Esfuerzo | Impacto |
-|-------|---------|----------|---------|
-| 6 | Modo lectura | 2-3 días | Medio |
-| 7 | Detección phishing | 2 días | Medio |
-| 8 | Tab suspension | 1 día | Medio |
-| 9 | Picture-in-Picture | 1 día | Bajo |
+| Orden | Función | Esfuerzo | Impacto | Estado |
+|-------|---------|----------|---------|--------|
+| 6 | Modo lectura | 2-3 días | Medio | Pendiente |
+| 7 | Detección phishing | 2 días | Medio | Pendiente |
+| 8 | Tab suspension manual | 1 día | Medio | ✅ Completado |
+| 9 | Tab suspension ML | 2-3 semanas | Alto | Pendiente |
+| 10 | Picture-in-Picture | 1 día | Bajo | Pendiente |
 
 ---
 

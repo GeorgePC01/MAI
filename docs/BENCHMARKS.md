@@ -167,6 +167,7 @@ MAI:     ██████████░░░░░░░░░░░░░�
 | OAuth/Cookies | +2 MB | v0.1.0 |
 | Favoritos | +1 MB | v0.2.0 |
 | Buscar en página (Cmd+F) | +0.5 MB | v0.2.1 |
+| Tab Suspension | **-70 MB/tab** | v0.2.1 |
 | **Total features** | **+11.5 MB** | |
 
 ### Proyección Futura
