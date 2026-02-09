@@ -24,9 +24,10 @@
 - [x] Refresh/Stop
 - [x] Zoom (in/out/reset)
 - [x] Historial funcional con persistencia
-- [x] Keyboard shortcuts (Cmd+Y, Cmd+J, Cmd+B, etc.)
-- [ ] Bookmarks manager (UI existe, falta persistencia)
+- [x] Keyboard shortcuts (Cmd+Y, Cmd+J, Cmd+B, Cmd+D, etc.)
+- [x] Bookmarks manager con persistencia (v0.2.0)
 - [ ] Downloads manager (UI placeholder)
+- [ ] Buscar en página (Cmd+F)
 
 ### Seguridad y OAuth ✅
 - [x] Cookies persistentes entre sesiones

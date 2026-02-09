@@ -24,14 +24,14 @@ Este documento analiza qué funcionalidades aportan valor real a MAI Browser ver
 
 ### Lo que falta (funciones básicas)
 
-| Función | Prioridad | Impacto |
-|---------|-----------|---------|
-| Gestor de contraseñas | Alta | ★★★★★ |
-| Favoritos persistentes | Alta | ★★★★☆ |
-| Descargas funcionales | Alta | ★★★★☆ |
-| Lector PDF | Media | ★★★☆☆ |
-| Modo lectura | Media | ★★★☆☆ |
-| Buscar en página (Cmd+F) | Alta | ★★★★☆ |
+| Función | Prioridad | Impacto | Estado |
+|---------|-----------|---------|--------|
+| Favoritos persistentes | Alta | ★★★★☆ | ✅ v0.2.0 |
+| Gestor de contraseñas | Alta | ★★★★★ | Pendiente |
+| Descargas funcionales | Alta | ★★★★☆ | Pendiente |
+| Buscar en página (Cmd+F) | Alta | ★★★★☆ | Pendiente |
+| Lector PDF | Media | ★★★☆☆ | Pendiente |
+| Modo lectura | Media | ★★★☆☆ | Pendiente |
 
 ---
 
@@ -266,13 +266,13 @@ Complejidad:  Baja
 
 ### Fase Actual → MVP Completo
 
-| Orden | Función | Esfuerzo | Impacto |
-|-------|---------|----------|---------|
-| 1 | Favoritos persistentes | 1 día | Alto |
-| 2 | Buscar en página (Cmd+F) | 1 día | Alto |
-| 3 | Descargas funcionales | 2-3 días | Alto |
-| 4 | Gestor de contraseñas | 3-5 días | Muy alto |
-| 5 | Lector PDF | 1-2 días | Medio |
+| Orden | Función | Esfuerzo | Impacto | Estado |
+|-------|---------|----------|---------|--------|
+| 1 | Favoritos persistentes | 1 día | Alto | ✅ Completado |
+| 2 | Buscar en página (Cmd+F) | 1 día | Alto | Pendiente |
+| 3 | Descargas funcionales | 2-3 días | Alto | Pendiente |
+| 4 | Gestor de contraseñas | 3-5 días | Muy alto | Pendiente |
+| 5 | Lector PDF | 1-2 días | Medio | Pendiente |
 
 ### Fase Siguiente → Diferenciación
 
@@ -316,4 +316,15 @@ Complejidad:  Baja
 
 ---
 
-*Última actualización: 2026-02-08*
+---
+
+## Historial de Versiones
+
+| Versión | Fecha | Cambios |
+|---------|-------|---------|
+| v0.1.0 | 2026-02-06 | Privacidad, OAuth, historial, anti-detección |
+| v0.2.0 | 2026-02-09 | Favoritos persistentes (+1 MB RAM) |
+
+---
+
+*Última actualización: 2026-02-09*
