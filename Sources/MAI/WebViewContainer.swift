@@ -91,6 +91,38 @@ struct SuspendedTabView: View {
     }
 }
 
+/// Controlador de ventana para popups OAuth
+class OAuthWindowController: NSWindowController, WKNavigationDelegate {
+    private var popupWebView: WKWebView?
+    private static var activeControllers: [OAuthWindowController] = []
+
+    convenience init(window: NSWindow, webView: WKWebView) {
+        self.init(window: window)
+        self.popupWebView = webView
+
+        // Mantener referencia activa
+        OAuthWindowController.activeControllers.append(self)
+
+        // Observar cuando se cierra la ventana
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(windowWillClose),
+            name: NSWindow.willCloseNotification,
+            object: window
+        )
+    }
+
+    @objc private func windowWillClose(_ notification: Notification) {
+        // Remover de controllers activos
+        OAuthWindowController.activeControllers.removeAll { $0 === self }
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+}
+
 /// Gestor centralizado de configuración web para compartir cookies entre tabs
 class WebViewConfigurationManager {
     static let shared = WebViewConfigurationManager()
@@ -450,11 +482,86 @@ struct WebViewRepresentable: NSViewRepresentable {
         // MARK: - WKUIDelegate
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            // Abrir links con target="_blank" en nueva pestaña
-            if let url = navigationAction.request.url {
-                browserState.createTab(url: url.absoluteString)
+            guard let url = navigationAction.request.url else {
+                return nil
             }
-            return nil
+
+            // Detectar si es un popup de OAuth (ventana pequeña, sin barra de navegación)
+            let isPopup = windowFeatures.menuBarVisibility?.boolValue == false ||
+                          windowFeatures.toolbarsVisibility?.boolValue == false ||
+                          (windowFeatures.width != nil && windowFeatures.height != nil)
+
+            // Dominios conocidos de OAuth que necesitan popup real
+            let oauthDomains = ["accounts.google.com", "login.microsoftonline.com",
+                               "appleid.apple.com", "github.com", "auth0.com",
+                               "clerk.com", "anthropic.com", "claude.ai"]
+
+            let isOAuthDomain = oauthDomains.contains { url.host?.contains($0) == true }
+
+            if isPopup || isOAuthDomain {
+                // Crear ventana popup real para OAuth
+                return createOAuthPopupWindow(configuration: configuration, url: url, windowFeatures: windowFeatures)
+            } else {
+                // Links normales: abrir en nueva pestaña
+                browserState.createTab(url: url.absoluteString)
+                return nil
+            }
+        }
+
+        /// Crea una ventana popup para flujos OAuth
+        private func createOAuthPopupWindow(configuration: WKWebViewConfiguration, url: URL, windowFeatures: WKWindowFeatures) -> WKWebView? {
+            // Crear WebView para el popup
+            let popupWebView = WKWebView(frame: .zero, configuration: configuration)
+            popupWebView.navigationDelegate = self
+            popupWebView.uiDelegate = self
+
+            // User agent de Safari
+            popupWebView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15"
+
+            // Calcular tamaño de ventana
+            let width = windowFeatures.width?.doubleValue ?? 500
+            let height = windowFeatures.height?.doubleValue ?? 700
+
+            // Crear ventana
+            let window = NSWindow(
+                contentRect: NSRect(x: 0, y: 0, width: width, height: height),
+                styleMask: [.titled, .closable, .resizable],
+                backing: .buffered,
+                defer: false
+            )
+            window.title = "Iniciar sesión"
+            window.contentView = popupWebView
+            window.center()
+
+            // CRÍTICO: Hacer que la ventana aparezca al frente
+            window.level = .floating  // Siempre encima de ventanas normales
+            window.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+
+            // Guardar referencia para que no se destruya
+            let windowController = OAuthWindowController(window: window, webView: popupWebView)
+            windowController.showWindow(nil)
+
+            // Después de 1 segundo, bajar el nivel para que no sea molesto
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                window.level = .normal
+            }
+
+            print("🔐 Popup OAuth abierto: \(url.host ?? url.absoluteString)")
+
+            return popupWebView
+        }
+
+        /// Cerrar popup cuando OAuth termina
+        func webViewDidClose(_ webView: WKWebView) {
+            // Buscar y cerrar la ventana del popup
+            for window in NSApp.windows {
+                if window.contentView == webView {
+                    window.close()
+                    print("🔐 Popup OAuth cerrado")
+                    break
+                }
+            }
         }
 
         func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
