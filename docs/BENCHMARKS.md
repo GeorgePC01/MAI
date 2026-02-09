@@ -166,7 +166,8 @@ MAI:     ██████████░░░░░░░░░░░░░�
 | Privacidad/Bloqueo | +3 MB | v0.1.0 |
 | OAuth/Cookies | +2 MB | v0.1.0 |
 | Favoritos | +1 MB | v0.2.0 |
-| **Total features** | **+11 MB** | |
+| Buscar en página (Cmd+F) | +0.5 MB | v0.2.1 |
+| **Total features** | **+11.5 MB** | |
 
 ### Proyección Futura
 
@@ -224,6 +225,7 @@ Los procesos `com.apple.WebKit.WebContent` son gestionados por macOS y pueden se
 | Fecha | Versión | MAI | Chrome | Ahorro |
 |-------|---------|-----|--------|--------|
 | 2026-02-09 | v0.2.0 | 846 MB | 3,478 MB | 76% |
+| 2026-02-09 | v0.2.1 | ~847 MB | - | 76% |
 
 ---
 

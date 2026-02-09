@@ -27,7 +27,7 @@
 - [x] Keyboard shortcuts (Cmd+Y, Cmd+J, Cmd+B, Cmd+D, etc.)
 - [x] Bookmarks manager con persistencia (v0.2.0)
 - [ ] Downloads manager (UI placeholder)
-- [ ] Buscar en página (Cmd+F)
+- [x] Buscar en página (Cmd+F) (v0.2.1)
 
 ### Seguridad y OAuth ✅
 - [x] Cookies persistentes entre sesiones
@@ -62,7 +62,7 @@
   - [ ] Article detection
   - [ ] Clean layout
   - [ ] Font/size controls
-- [ ] Buscar en página (Cmd+F)
+- [x] Buscar en página (Cmd+F) (v0.2.1)
 
 ## Fase 2: Funcionalidades Core (Q3 2026)
 

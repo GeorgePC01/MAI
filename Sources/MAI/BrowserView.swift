@@ -20,6 +20,12 @@ struct BrowserView: View {
                     .tint(.blue)
             }
 
+            // Barra de búsqueda en página (Cmd+F)
+            if browserState.showFindInPage {
+                FindInPageBar()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // Contenido principal
             HStack(spacing: 0) {
                 // Sidebar opcional
@@ -432,6 +438,108 @@ struct BlockedRequestRow: View {
         .padding(.horizontal)
         .padding(.vertical, 6)
         .contentShape(Rectangle())
+    }
+}
+
+/// Barra de búsqueda en página (Cmd+F)
+struct FindInPageBar: View {
+    @EnvironmentObject var browserState: BrowserState
+    @State private var searchText: String = ""
+    @FocusState private var isFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Campo de búsqueda
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundColor(.secondary)
+
+                TextField("Buscar en página...", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .focused($isFocused)
+                    .onSubmit {
+                        browserState.findNext()
+                    }
+                    .onChange(of: searchText) { newValue in
+                        browserState.findInPage(newValue)
+                    }
+
+                // Contador de resultados
+                if browserState.findResultCount > 0 {
+                    Text("\(browserState.findCurrentIndex)/\(browserState.findResultCount)")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .monospacedDigit()
+                } else if !searchText.isEmpty {
+                    Text("Sin resultados")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(NSColor.textBackgroundColor))
+            )
+            .frame(maxWidth: 300)
+
+            // Botones de navegación
+            HStack(spacing: 4) {
+                Button(action: { browserState.findPrevious() }) {
+                    Image(systemName: "chevron.up")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(FindButtonStyle())
+                .disabled(browserState.findResultCount == 0)
+                .help("Anterior (Shift+Enter)")
+
+                Button(action: { browserState.findNext() }) {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .buttonStyle(FindButtonStyle())
+                .disabled(browserState.findResultCount == 0)
+                .help("Siguiente (Enter)")
+            }
+
+            Spacer()
+
+            // Botón cerrar
+            Button(action: { browserState.closeFindInPage() }) {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(FindButtonStyle())
+            .keyboardShortcut(.escape, modifiers: [])
+            .help("Cerrar (Esc)")
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(NSColor.controlBackgroundColor))
+        .onAppear {
+            isFocused = true
+            searchText = browserState.findQuery
+        }
+        .onDisappear {
+            browserState.clearFindHighlights()
+        }
+    }
+}
+
+/// Estilo para botones de búsqueda
+struct FindButtonStyle: ButtonStyle {
+    @Environment(\.isEnabled) var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .frame(width: 24, height: 24)
+            .foregroundColor(isEnabled ? .primary : .secondary.opacity(0.5))
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(configuration.isPressed ? Color.gray.opacity(0.3) : Color.clear)
+            )
     }
 }
 

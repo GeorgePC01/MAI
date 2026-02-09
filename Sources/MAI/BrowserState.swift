@@ -143,6 +143,189 @@ class BrowserState: ObservableObject {
         navigate(to: "https://www.google.com")
     }
 
+    // MARK: - Find in Page
+
+    @Published var findQuery: String = ""
+    @Published var findResultCount: Int = 0
+    @Published var findCurrentIndex: Int = 0
+
+    func findInPage(_ query: String) {
+        findQuery = query
+        guard !query.isEmpty, let webView = currentTab?.webView else {
+            clearFindHighlights()
+            return
+        }
+
+        // JavaScript para buscar y resaltar todas las coincidencias
+        let script = """
+        (function() {
+            // Limpiar highlights anteriores
+            const existingHighlights = document.querySelectorAll('.mai-find-highlight');
+            existingHighlights.forEach(el => {
+                const parent = el.parentNode;
+                parent.replaceChild(document.createTextNode(el.textContent), el);
+                parent.normalize();
+            });
+
+            const query = '\(query.replacingOccurrences(of: "'", with: "\\'").replacingOccurrences(of: "\\", with: "\\\\"))';
+            if (!query) return JSON.stringify({count: 0, current: 0});
+
+            const marks = [];
+            const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+
+            while (walker.nextNode()) {
+                const node = walker.currentNode;
+                const text = node.nodeValue;
+                const lowerText = text.toLowerCase();
+                const lowerQuery = query.toLowerCase();
+                let index = lowerText.indexOf(lowerQuery);
+
+                if (index >= 0) {
+                    const span = document.createElement('span');
+                    span.className = 'mai-find-highlight';
+                    span.style.backgroundColor = '#ffff00';
+                    span.style.color = '#000';
+                    span.textContent = text.substring(index, index + query.length);
+
+                    const before = document.createTextNode(text.substring(0, index));
+                    const after = document.createTextNode(text.substring(index + query.length));
+
+                    const parent = node.parentNode;
+                    parent.insertBefore(before, node);
+                    parent.insertBefore(span, node);
+                    parent.insertBefore(after, node);
+                    parent.removeChild(node);
+
+                    marks.push(span);
+                }
+            }
+
+            // Resaltar el primero como actual
+            if (marks.length > 0) {
+                marks[0].style.backgroundColor = '#ff9500';
+                marks[0].scrollIntoView({behavior: 'smooth', block: 'center'});
+            }
+
+            window.maiFindMarks = marks;
+            window.maiFindIndex = 0;
+
+            return JSON.stringify({count: marks.length, current: marks.length > 0 ? 1 : 0});
+        })();
+        """
+
+        webView.evaluateJavaScript(script) { [weak self] result, _ in
+            if let json = result as? String,
+               let data = json.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Int] {
+                DispatchQueue.main.async {
+                    self?.findResultCount = dict["count"] ?? 0
+                    self?.findCurrentIndex = dict["current"] ?? 0
+                }
+            }
+        }
+    }
+
+    func findNext() {
+        guard !findQuery.isEmpty, let webView = currentTab?.webView else { return }
+
+        let script = """
+        (function() {
+            const marks = window.maiFindMarks || [];
+            if (marks.length === 0) return JSON.stringify({count: 0, current: 0});
+
+            let index = window.maiFindIndex || 0;
+
+            // Quitar highlight actual
+            marks[index].style.backgroundColor = '#ffff00';
+
+            // Siguiente
+            index = (index + 1) % marks.length;
+            window.maiFindIndex = index;
+
+            // Resaltar nuevo
+            marks[index].style.backgroundColor = '#ff9500';
+            marks[index].scrollIntoView({behavior: 'smooth', block: 'center'});
+
+            return JSON.stringify({count: marks.length, current: index + 1});
+        })();
+        """
+
+        webView.evaluateJavaScript(script) { [weak self] result, _ in
+            if let json = result as? String,
+               let data = json.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Int] {
+                DispatchQueue.main.async {
+                    self?.findResultCount = dict["count"] ?? 0
+                    self?.findCurrentIndex = dict["current"] ?? 0
+                }
+            }
+        }
+    }
+
+    func findPrevious() {
+        guard !findQuery.isEmpty, let webView = currentTab?.webView else { return }
+
+        let script = """
+        (function() {
+            const marks = window.maiFindMarks || [];
+            if (marks.length === 0) return JSON.stringify({count: 0, current: 0});
+
+            let index = window.maiFindIndex || 0;
+
+            // Quitar highlight actual
+            marks[index].style.backgroundColor = '#ffff00';
+
+            // Anterior
+            index = (index - 1 + marks.length) % marks.length;
+            window.maiFindIndex = index;
+
+            // Resaltar nuevo
+            marks[index].style.backgroundColor = '#ff9500';
+            marks[index].scrollIntoView({behavior: 'smooth', block: 'center'});
+
+            return JSON.stringify({count: marks.length, current: index + 1});
+        })();
+        """
+
+        webView.evaluateJavaScript(script) { [weak self] result, _ in
+            if let json = result as? String,
+               let data = json.data(using: .utf8),
+               let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Int] {
+                DispatchQueue.main.async {
+                    self?.findResultCount = dict["count"] ?? 0
+                    self?.findCurrentIndex = dict["current"] ?? 0
+                }
+            }
+        }
+    }
+
+    func clearFindHighlights() {
+        guard let webView = currentTab?.webView else { return }
+
+        let script = """
+        (function() {
+            const highlights = document.querySelectorAll('.mai-find-highlight');
+            highlights.forEach(el => {
+                const parent = el.parentNode;
+                parent.replaceChild(document.createTextNode(el.textContent), el);
+                parent.normalize();
+            });
+            window.maiFindMarks = [];
+            window.maiFindIndex = 0;
+        })();
+        """
+
+        webView.evaluateJavaScript(script, completionHandler: nil)
+        findResultCount = 0
+        findCurrentIndex = 0
+        findQuery = ""
+    }
+
+    func closeFindInPage() {
+        clearFindHighlights()
+        showFindInPage = false
+    }
+
     // MARK: - Zoom
 
     func zoomIn() {

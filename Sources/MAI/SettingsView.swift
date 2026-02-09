@@ -1,4 +1,5 @@
 import SwiftUI
+import WebKit
 
 /// Vista de configuración del navegador
 struct SettingsView: View {
@@ -130,7 +131,7 @@ struct PrivacySettingsView: View {
     private func clearAllData() {
         let alert = NSAlert()
         alert.messageText = "Borrar todos los datos"
-        alert.informativeText = "Esto eliminará historial, cookies, cache y datos de sitios. Esta acción no se puede deshacer."
+        alert.informativeText = "Esto eliminará historial, cookies, cache y datos de sitios (incluyendo preferencias de tema de Google). Esta acción no se puede deshacer."
         alert.addButton(withTitle: "Borrar")
         alert.addButton(withTitle: "Cancelar")
         alert.alertStyle = .warning
@@ -140,8 +141,19 @@ struct PrivacySettingsView: View {
             let dataStore = WKWebsiteDataStore.default()
             let dataTypes = WKWebsiteDataStore.allWebsiteDataTypes()
             dataStore.removeData(ofTypes: dataTypes, modifiedSince: .distantPast) {
-                print("Datos borrados")
+                DispatchQueue.main.async {
+                    // Mostrar confirmación
+                    let confirmAlert = NSAlert()
+                    confirmAlert.messageText = "Datos borrados"
+                    confirmAlert.informativeText = "Se han eliminado todas las cookies, cache y datos de sitios. Recarga la página para ver los cambios."
+                    confirmAlert.addButton(withTitle: "OK")
+                    confirmAlert.alertStyle = .informational
+                    confirmAlert.runModal()
+                }
             }
+
+            // También limpiar historial local
+            HistoryManager.shared.clearAll()
         }
     }
 }
@@ -226,5 +238,3 @@ struct AdvancedSettingsView: View {
         .padding()
     }
 }
-
-import WebKit
