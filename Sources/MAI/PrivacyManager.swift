@@ -60,6 +60,16 @@ class PrivacyManager: ObservableObject {
         "aadcdn.msftauth.net",
         "logincdn.msauth.net",
 
+        // Microsoft SafeLinks (enlaces de correo Outlook)
+        "safelinks.protection.outlook.com",
+        "na01.safelinks.protection.outlook.com",
+        "nam01.safelinks.protection.outlook.com",
+        "nam02.safelinks.protection.outlook.com",
+        "nam10.safelinks.protection.outlook.com",
+        "nam11.safelinks.protection.outlook.com",
+        "eur01.safelinks.protection.outlook.com",
+        "eur02.safelinks.protection.outlook.com",
+
         // Apple OAuth
         "appleid.apple.com",
         "idmsa.apple.com",
