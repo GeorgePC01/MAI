@@ -371,15 +371,33 @@ struct WebViewRepresentable: NSViewRepresentable {
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             tab.isLoading = true
             browserState.isLoading = true
+
+            // Debug: ver a dónde estamos navegando
+            if let url = webView.url {
+                print("📍 Navegación iniciada: \(url.absoluteString)")
+            }
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             tab.isLoading = false
             browserState.isLoading = false
+
+            // Si terminamos de cargar SafeLinks, extraer y navegar a URL real
+            if let currentURL = webView.url,
+               currentURL.absoluteString.contains("safelinks.protection.outlook.com") {
+                if let realURL = extractSafeLinksURL(from: currentURL) {
+                    print("🔗 SafeLinks cargó, redirigiendo a: \(realURL.absoluteString)")
+                    webView.load(URLRequest(url: realURL))
+                    return
+                }
+            }
+
             tab.updateFromWebView(webView)
 
-            // Registrar en historial
-            if let url = webView.url?.absoluteString {
+            // No registrar SafeLinks ni about:blank en historial
+            if let url = webView.url?.absoluteString,
+               !url.contains("safelinks.protection.outlook.com"),
+               url != "about:blank" {
                 HistoryManager.shared.recordVisit(
                     url: url,
                     title: webView.title ?? url
@@ -406,6 +424,25 @@ struct WebViewRepresentable: NSViewRepresentable {
             guard let url = navigationAction.request.url else {
                 decisionHandler(.allow)
                 return
+            }
+
+            // Bloquear navegación a about:blank que viene de SafeLinks (borra la página)
+            if url.absoluteString == "about:blank" {
+                // Verificar si la página actual es SafeLinks
+                if let currentURL = webView.url?.absoluteString,
+                   currentURL.contains("safelinks.protection.outlook.com") {
+                    print("🚫 Bloqueando redirección a about:blank desde SafeLinks")
+                    decisionHandler(.cancel)
+                    return
+                }
+                // También bloquear si la pestaña tiene una URL real y alguien quiere borrarla
+                if let currentURL = webView.url,
+                   currentURL.absoluteString != "about:blank",
+                   !currentURL.absoluteString.isEmpty {
+                    print("🚫 Bloqueando redirección sospechosa a about:blank")
+                    decisionHandler(.cancel)
+                    return
+                }
             }
 
             // Interceptar Microsoft SafeLinks y extraer URL real
@@ -511,16 +548,45 @@ struct WebViewRepresentable: NSViewRepresentable {
         // MARK: - WKUIDelegate
 
         func webView(_ webView: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for navigationAction: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
-            guard let url = navigationAction.request.url else {
+            let targetURL = navigationAction.request.url
+            let sourceURL = navigationAction.sourceFrame.request.url
+
+            print("🔗 createWebViewWith:")
+            print("   - Target URL: \(targetURL?.absoluteString ?? "nil")")
+            print("   - Source URL: \(sourceURL?.absoluteString ?? "nil")")
+
+            // Caso especial: URL es about:blank o nil pero tenemos un sourceURL de SafeLinks
+            // SafeLinks usa window.open('about:blank') y luego navega via JavaScript
+            if (targetURL == nil || targetURL?.absoluteString == "about:blank") {
+                // Verificar si el source es SafeLinks
+                if let source = sourceURL, source.absoluteString.contains("safelinks.protection.outlook.com") {
+                    // Extraer la URL real del SafeLinks source
+                    if let realURL = extractSafeLinksURL(from: source) {
+                        print("🔗 SafeLinks detectado en source, abriendo: \(realURL.absoluteString)")
+                        browserState.createTab(url: realURL.absoluteString)
+                        return nil
+                    }
+                }
+
+                // Si no podemos extraer nada útil, retornar nil
+                print("🔗 window.open con about:blank sin URL útil - ignorando")
                 return nil
             }
 
-            // Detectar si es un popup de OAuth (ventana pequeña, sin barra de navegación)
+            guard let url = targetURL else { return nil }
+
+            // Interceptar SafeLinks y extraer URL real
+            if let realURL = extractSafeLinksURL(from: url) {
+                print("🔗 SafeLinks en target, redirigiendo a: \(realURL.absoluteString)")
+                browserState.createTab(url: realURL.absoluteString)
+                return nil
+            }
+
+            // Detectar si es un popup de OAuth
             let isPopup = windowFeatures.menuBarVisibility?.boolValue == false ||
                           windowFeatures.toolbarsVisibility?.boolValue == false ||
                           (windowFeatures.width != nil && windowFeatures.height != nil)
 
-            // Dominios conocidos de OAuth que necesitan popup real
             let oauthDomains = ["accounts.google.com", "login.microsoftonline.com",
                                "appleid.apple.com", "github.com", "auth0.com",
                                "clerk.com", "anthropic.com", "claude.ai"]
@@ -528,10 +594,8 @@ struct WebViewRepresentable: NSViewRepresentable {
             let isOAuthDomain = oauthDomains.contains { url.host?.contains($0) == true }
 
             if isPopup || isOAuthDomain {
-                // Crear ventana popup real para OAuth
                 return createOAuthPopupWindow(configuration: configuration, url: url, windowFeatures: windowFeatures)
             } else {
-                // Links normales: abrir en nueva pestaña
                 browserState.createTab(url: url.absoluteString)
                 return nil
             }
