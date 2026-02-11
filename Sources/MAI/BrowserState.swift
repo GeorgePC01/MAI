@@ -120,7 +120,36 @@ class BrowserState: ObservableObject {
             }
         }
 
+        // Detectar y extraer URL real de Microsoft SafeLinks
+        if let extractedURL = extractSafeLinksURL(from: finalURL) {
+            print("🔗 SafeLinks detectado, redirigiendo a: \(extractedURL)")
+            finalURL = extractedURL
+        }
+
         tab.navigate(to: finalURL)
+    }
+
+    /// Extrae la URL real de un enlace de Microsoft SafeLinks
+    private func extractSafeLinksURL(from urlString: String) -> String? {
+        // Detectar si es un SafeLinks URL
+        guard urlString.contains("safelinks.protection.outlook.com") else {
+            return nil
+        }
+
+        // Extraer el parámetro "url=" de la query string
+        guard let url = URL(string: urlString),
+              let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+              let queryItems = components.queryItems,
+              let urlParam = queryItems.first(where: { $0.name == "url" })?.value else {
+            return nil
+        }
+
+        // La URL viene codificada, decodificarla
+        guard let decodedURL = urlParam.removingPercentEncoding else {
+            return urlParam
+        }
+
+        return decodedURL
     }
 
     func goBack() {

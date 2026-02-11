@@ -408,6 +408,16 @@ struct WebViewRepresentable: NSViewRepresentable {
                 return
             }
 
+            // Interceptar Microsoft SafeLinks y extraer URL real
+            if let realURL = extractSafeLinksURL(from: url) {
+                print("🔗 SafeLinks interceptado, redirigiendo a: \(realURL.absoluteString)")
+                decisionHandler(.cancel)
+                DispatchQueue.main.async {
+                    webView.load(URLRequest(url: realURL))
+                }
+                return
+            }
+
             // Verificar si debe bloquearse (respeta whitelist de OAuth)
             if PrivacyManager.shared.shouldBlock(url: url) {
                 PrivacyManager.shared.recordBlockedRequest(url: url, type: .tracker)
@@ -417,6 +427,24 @@ struct WebViewRepresentable: NSViewRepresentable {
             }
 
             decisionHandler(.allow)
+        }
+
+        /// Extrae la URL real de Microsoft SafeLinks
+        private func extractSafeLinksURL(from url: URL) -> URL? {
+            guard let host = url.host?.lowercased(),
+                  host.contains("safelinks.protection.outlook.com") else {
+                return nil
+            }
+
+            guard let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
+                  let queryItems = components.queryItems,
+                  let urlParam = queryItems.first(where: { $0.name == "url" })?.value,
+                  let decodedString = urlParam.removingPercentEncoding,
+                  let realURL = URL(string: decodedString) else {
+                return nil
+            }
+
+            return realURL
         }
 
         // Manejar challenges de autenticación (certificados HTTPS, auth básica)
