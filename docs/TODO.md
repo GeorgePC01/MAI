@@ -26,7 +26,7 @@
 - [x] Historial funcional con persistencia
 - [x] Keyboard shortcuts (Cmd+Y, Cmd+J, Cmd+B, Cmd+D, etc.)
 - [x] Bookmarks manager con persistencia (v0.2.0)
-- [ ] Downloads manager (UI placeholder)
+- [x] Downloads manager funcional (v0.2.1)
 - [x] Buscar en página (Cmd+F) (v0.2.1)
 
 ### Seguridad y OAuth ✅
@@ -36,6 +36,9 @@
 - [x] Autenticación HTTP básica
 - [x] Manejo de certificados HTTPS
 - [x] JavaScript prompts (alert, confirm, prompt)
+- [x] OAuth popup windows (Claude, Google, etc.) (v0.2.1)
+- [x] Permisos cámara/micrófono (v0.2.1)
+- [x] Microsoft SafeLinks support (v0.2.1)
 - [ ] Passkeys/WebAuthn (requiere Apple Developer)
 
 ### Privacidad ✅
@@ -154,4 +157,4 @@
 
 ---
 
-**Última actualización: 2026-02-06**
+**Última actualización: 2026-02-13**

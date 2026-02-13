@@ -28,7 +28,7 @@ Este documento analiza qué funcionalidades aportan valor real a MAI Browser ver
 |---------|-----------|---------|--------|
 | Favoritos persistentes | Alta | ★★★★☆ | ✅ v0.2.0 |
 | Gestor de contraseñas | Alta | ★★★★★ | Pendiente |
-| Descargas funcionales | Alta | ★★★★☆ | Pendiente |
+| Descargas funcionales | Alta | ★★★★☆ | ✅ v0.2.1 |
 | Buscar en página (Cmd+F) | Alta | ★★★★☆ | ✅ v0.2.1 |
 | Lector PDF | Media | ★★★☆☆ | Pendiente |
 | Modo lectura | Media | ★★★☆☆ | Pendiente |
@@ -277,7 +277,7 @@ Estado:       ✅ Fase 1 completada (manual)
 |-------|---------|----------|---------|--------|
 | 1 | Favoritos persistentes | 1 día | Alto | ✅ Completado |
 | 2 | Buscar en página (Cmd+F) | 1 día | Alto | ✅ Completado |
-| 3 | Descargas funcionales | 2-3 días | Alto | Pendiente |
+| 3 | Descargas funcionales | 2-3 días | Alto | ✅ Completado |
 | 4 | Gestor de contraseñas | 3-5 días | Muy alto | Pendiente |
 | 5 | Lector PDF | 1-2 días | Medio | Pendiente |
 
@@ -335,4 +335,4 @@ Estado:       ✅ Fase 1 completada (manual)
 
 ---
 
-*Última actualización: 2026-02-09*
+*Última actualización: 2026-02-13*
