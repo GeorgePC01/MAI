@@ -19,6 +19,12 @@ Este documento analiza qué funcionalidades aportan valor real a MAI Browser ver
 | OAuth funcional | ✅ | ★★★★★ |
 | Historial con búsqueda | ✅ | ★★★★☆ |
 | Tabs y navegación | ✅ | ★★★★☆ |
+| Multi-ventana (Cmd+N) | ✅ | ★★★★☆ |
+| File upload | ✅ | ★★★★☆ |
+| Buscar en página (Cmd+F) | ✅ | ★★★★☆ |
+| Descargas funcionales | ✅ | ★★★★☆ |
+| Tab suspension manual | ✅ | ★★★☆☆ |
+| Banner videoconferencia | ✅ | ★★★☆☆ |
 | Fullscreen video | ✅ | ★★★☆☆ |
 | Keyboard shortcuts | ✅ | ★★★☆☆ |
 
@@ -332,7 +338,10 @@ Estado:       ✅ Fase 1 completada (manual)
 |---------|-------|---------|
 | v0.1.0 | 2026-02-06 | Privacidad, OAuth, historial, anti-detección |
 | v0.2.0 | 2026-02-09 | Favoritos persistentes (+1 MB RAM) |
+| v0.2.1 | 2026-02-13 | Find in page, tab suspension, OAuth popups, downloads, cámara/micrófono, SafeLinks |
+| v0.3.0 | 2026-02-15 | Multi-ventana (Cmd+N), file upload (NSOpenPanel) |
+| v0.3.1 | 2026-02-15 | Banner videoconferencia, fix about:blank, fix navigator spoofing |
 
 ---
 
-*Última actualización: 2026-02-13*
+*Última actualización: 2026-02-15*

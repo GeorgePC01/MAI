@@ -19,6 +19,7 @@
 - [x] Sidebar (Favoritos/Historial/Descargas)
 - [x] Barra de estado con estadísticas
 - [x] Multi-ventana (Cmd+N) con WindowManager (v0.3.0)
+- [x] Banner de videoconferencia con "Abrir en Chrome" (v0.3.1)
 
 ### Navegación ✅
 - [x] Navegación básica (forward/back)
@@ -30,6 +31,7 @@
 - [x] Downloads manager funcional (v0.2.1)
 - [x] Buscar en página (Cmd+F) (v0.2.1)
 - [x] File upload / Open Panel para subir archivos (v0.3.0)
+- [x] Apertura en navegador externo para videoconferencias (v0.3.1)
 
 ### Seguridad y OAuth ✅
 - [x] Cookies persistentes entre sesiones
@@ -50,6 +52,7 @@
 - [x] Whitelist OAuth (no bloquea login)
 - [x] Contador de requests bloqueadas
 - [x] Toggles en Settings
+- [x] Anti-detección reducida para compatibilidad con sitios enterprise (v0.3.1)
 - [ ] Fingerprinting protection (diseñado, no implementado)
 - [ ] DNS over HTTPS (configuración existe)
 
@@ -68,6 +71,19 @@
   - [ ] Clean layout
   - [ ] Font/size controls
 - [x] Buscar en página (Cmd+F) (v0.2.1)
+
+### Compatibilidad y Bugfixes (v0.3.1)
+- [x] Fix: about:blank blocking solo para SafeLinks (antes bloqueaba navegación legítima)
+- [x] Fix: Navigator spoofing reducido (causaba redirect loops en sitios enterprise como Broadcom)
+- [x] Detección de sitios de videoconferencia (Meet, Zoom, Teams)
+- [x] Banner "Abrir en Chrome" para compartir pantalla (WebKit limitation con iPad Sidecar)
+- [x] Apertura automática en Chrome/navegador externo
+
+### Fase 2 Futura: Motor Híbrido (CEF)
+- [ ] Integración de Chromium Embedded Framework (CEF) para videoconferencias
+- [ ] WebKit para navegación general, Chromium solo para Meet/Zoom/Teams
+- [ ] Compartir pantalla completa con iPad Sidecar via Chromium
+- [ ] Optimización de RAM para motor dual
 
 ## Fase 2: Funcionalidades Core (Q3 2026)
 
@@ -155,8 +171,8 @@
 |---------|-------|
 | RAM promedio | ~167 MB (vs Chrome 2.5+ GB) |
 | Archivos Swift | 12 |
-| Líneas de código | ~2,500 |
+| Líneas de código | ~2,800 |
 
 ---
 
-**Última actualización: 2026-02-15**
+**Última actualización: 2026-02-15 (v0.3.1)**
