@@ -693,6 +693,35 @@ struct WebViewRepresentable: NSViewRepresentable {
         }
 
 
+        // MARK: - File Upload (Open Panel)
+
+        /// Manejar solicitudes de selección de archivos (file input, Google Drive upload, etc.)
+        func webView(_ webView: WKWebView, runOpenPanelWith parameters: WKOpenPanelParameters, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping ([URL]?) -> Void) {
+            let openPanel = NSOpenPanel()
+            openPanel.canChooseFiles = true
+            openPanel.canChooseDirectories = parameters.allowsDirectories
+            openPanel.allowsMultipleSelection = parameters.allowsMultipleSelection
+            openPanel.title = "Seleccionar archivo"
+
+            if let window = webView.window {
+                openPanel.beginSheetModal(for: window) { response in
+                    if response == .OK {
+                        completionHandler(openPanel.urls)
+                    } else {
+                        completionHandler(nil)
+                    }
+                }
+            } else {
+                // Fallback si no hay ventana parent
+                let response = openPanel.runModal()
+                if response == .OK {
+                    completionHandler(openPanel.urls)
+                } else {
+                    completionHandler(nil)
+                }
+            }
+        }
+
         func webView(_ webView: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
             let alert = NSAlert()
             alert.messageText = "Mensaje de la página"

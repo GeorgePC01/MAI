@@ -1,5 +1,61 @@
 import SwiftUI
 
+/// Gestor de ventanas adicionales del navegador
+class WindowManager {
+    static let shared = WindowManager()
+    private var windows: [(window: NSWindow, state: BrowserState)] = []
+
+    func openNewWindow() {
+        let browserState = BrowserState()
+        let contentView = BrowserView()
+            .environmentObject(browserState)
+            .frame(minWidth: 800, minHeight: 600)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: contentView)
+        window.title = "MAI Browser"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.center()
+
+        // Offset ligeramente de la ventana actual
+        if let keyWindow = NSApp.keyWindow {
+            let offset: CGFloat = 30
+            window.setFrameOrigin(NSPoint(
+                x: keyWindow.frame.origin.x + offset,
+                y: keyWindow.frame.origin.y - offset
+            ))
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        windows.append((window: window, state: browserState))
+
+        // Limpiar referencia cuando se cierre la ventana
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] notification in
+            if let closedWindow = notification.object as? NSWindow {
+                self?.windows.removeAll { $0.window === closedWindow }
+            }
+        }
+
+        print("🪟 Nueva ventana abierta (\(windows.count + 1) ventanas activas)")
+    }
+
+    var windowCount: Int {
+        windows.count
+    }
+}
+
 /// Aplicación principal MAI Browser
 @main
 struct MAIApp: App {
@@ -22,7 +78,7 @@ struct MAIApp: App {
                 .keyboardShortcut("t", modifiers: .command)
 
                 Button("Nueva Ventana") {
-                    // TODO: Implementar nueva ventana
+                    WindowManager.shared.openNewWindow()
                 }
                 .keyboardShortcut("n", modifiers: .command)
 

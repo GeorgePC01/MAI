@@ -18,6 +18,7 @@
 - [x] Settings panel completo
 - [x] Sidebar (Favoritos/Historial/Descargas)
 - [x] Barra de estado con estadísticas
+- [x] Multi-ventana (Cmd+N) con WindowManager (v0.3.0)
 
 ### Navegación ✅
 - [x] Navegación básica (forward/back)
@@ -28,6 +29,7 @@
 - [x] Bookmarks manager con persistencia (v0.2.0)
 - [x] Downloads manager funcional (v0.2.1)
 - [x] Buscar en página (Cmd+F) (v0.2.1)
+- [x] File upload / Open Panel para subir archivos (v0.3.0)
 
 ### Seguridad y OAuth ✅
 - [x] Cookies persistentes entre sesiones
@@ -157,4 +159,4 @@
 
 ---
 
-**Última actualización: 2026-02-13**
+**Última actualización: 2026-02-15**
