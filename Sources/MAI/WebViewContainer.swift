@@ -176,7 +176,9 @@ class WebViewConfigurationManager {
         return config
     }
 
-    /// Script para ocultar propiedades que delatan WKWebView
+    /// Script mínimo para compatibilidad - solo oculta webdriver flag
+    /// No modifica plugins, languages ni platform para evitar romper
+    /// fingerprinting de seguridad en portales empresariales
     private static let navigatorSpoofingScript = """
     (function() {
         // Ocultar detección de WebDriver (WKWebView lo expone)
@@ -185,47 +187,18 @@ class WebViewConfigurationManager {
             configurable: true
         });
 
-        // Vendor correcto de Safari
-        Object.defineProperty(navigator, 'vendor', {
-            get: () => 'Apple Computer, Inc.',
-            configurable: true
-        });
-
-        // Plataforma correcta
-        Object.defineProperty(navigator, 'platform', {
-            get: () => 'MacIntel',
-            configurable: true
-        });
-
         // Ocultar userAgentData (Chrome-specific, Safari no lo tiene)
-        Object.defineProperty(navigator, 'userAgentData', {
-            get: () => undefined,
-            configurable: true
-        });
+        if (navigator.userAgentData !== undefined) {
+            Object.defineProperty(navigator, 'userAgentData', {
+                get: () => undefined,
+                configurable: true
+            });
+        }
 
         // Eliminar rastros de Chrome si existen
         if (window.chrome !== undefined) {
             delete window.chrome;
         }
-
-        // Asegurar que plugins parezcan de Safari
-        Object.defineProperty(navigator, 'plugins', {
-            get: () => {
-                return {
-                    length: 5,
-                    item: (i) => null,
-                    namedItem: (name) => null,
-                    refresh: () => {}
-                };
-            },
-            configurable: true
-        });
-
-        // Languages de Safari
-        Object.defineProperty(navigator, 'languages', {
-            get: () => ['es-ES', 'es', 'en-US', 'en'],
-            configurable: true
-        });
     })();
     """
 }
@@ -426,20 +399,11 @@ struct WebViewRepresentable: NSViewRepresentable {
                 return
             }
 
-            // Bloquear navegación a about:blank que viene de SafeLinks (borra la página)
+            // Bloquear navegación a about:blank SOLO desde SafeLinks (borra la página)
             if url.absoluteString == "about:blank" {
-                // Verificar si la página actual es SafeLinks
                 if let currentURL = webView.url?.absoluteString,
                    currentURL.contains("safelinks.protection.outlook.com") {
                     print("🚫 Bloqueando redirección a about:blank desde SafeLinks")
-                    decisionHandler(.cancel)
-                    return
-                }
-                // También bloquear si la pestaña tiene una URL real y alguien quiere borrarla
-                if let currentURL = webView.url,
-                   currentURL.absoluteString != "about:blank",
-                   !currentURL.absoluteString.isEmpty {
-                    print("🚫 Bloqueando redirección sospechosa a about:blank")
                     decisionHandler(.cancel)
                     return
                 }
