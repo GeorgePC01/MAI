@@ -19,8 +19,13 @@ struct WebViewContainer: View {
                         SuspendedTabView(tab: tab)
                             .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
                             .allowsHitTesting(tab.id == browserState.currentTab?.id)
+                    } else if tab.useChromiumEngine {
+                        // Tab de videoconferencia: usar Chromium (CEF)
+                        CEFWebView(url: tab.url, tab: tab)
+                            .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
+                            .allowsHitTesting(tab.id == browserState.currentTab?.id)
                     } else {
-                        // Tab activa: mostrar WebView
+                        // Tab normal: usar WebKit
                         WebViewRepresentable(tab: tab, browserState: browserState)
                             .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
                             .allowsHitTesting(tab.id == browserState.currentTab?.id)

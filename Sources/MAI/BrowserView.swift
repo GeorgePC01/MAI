@@ -26,9 +26,9 @@ struct BrowserView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // Banner de videoconferencia (abrir en Chrome)
-            if browserState.shouldShowVideoConferenceBanner {
-                VideoConferenceBanner()
+            // Indicador de motor Chromium (cuando el tab usa CEF)
+            if browserState.isCurrentTabChromium {
+                ChromiumEngineIndicator()
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
@@ -564,50 +564,30 @@ struct FindButtonStyle: ButtonStyle {
     }
 }
 
-/// Banner que sugiere abrir videoconferencias en Chrome para mejor screen sharing
-struct VideoConferenceBanner: View {
+/// Indicador sutil cuando un tab usa Chromium engine (CEF) para videoconferencias
+struct ChromiumEngineIndicator: View {
     @EnvironmentObject var browserState: BrowserState
 
     var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "video.fill")
-                .foregroundColor(.blue)
-                .font(.system(size: 14))
+        HStack(spacing: 8) {
+            Image(systemName: "gearshape.2.fill")
+                .foregroundColor(.orange)
+                .font(.system(size: 11))
 
-            Text("\(browserState.videoConferenceServiceName) funciona mejor en Chrome para compartir pantalla")
-                .font(.system(size: 12))
+            Text("Chromium")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.orange)
+
+            Text("- \(browserState.videoConferenceServiceName) (screen sharing habilitado)")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
                 .lineLimit(1)
 
             Spacer()
-
-            Button(action: { browserState.openInExternalBrowser() }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.up.forward.app")
-                    Text("Abrir en Chrome")
-                }
-                .font(.system(size: 12, weight: .medium))
-                .padding(.horizontal, 12)
-                .padding(.vertical, 5)
-                .background(Color.blue)
-                .foregroundColor(.white)
-                .cornerRadius(6)
-            }
-            .buttonStyle(.plain)
-
-            Button(action: {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    browserState.dismissVideoConferenceBanner()
-                }
-            }) {
-                Image(systemName: "xmark")
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(.secondary)
-            }
-            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(Color.blue.opacity(0.1))
+        .padding(.vertical, 4)
+        .background(Color.orange.opacity(0.08))
     }
 }
 

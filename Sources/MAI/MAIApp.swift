@@ -1,4 +1,5 @@
 import SwiftUI
+import CEFWrapper
 
 /// Gestor de ventanas adicionales del navegador
 class WindowManager {
@@ -207,6 +208,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Shutdown CEF if it was initialized
+        if CEFBridge.isInitialized {
+            CEFBridge.shutdownCEF()
+        }
         print("MAI Browser terminando...")
     }
 

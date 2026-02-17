@@ -76,14 +76,32 @@
 - [x] Fix: about:blank blocking solo para SafeLinks (antes bloqueaba navegación legítima)
 - [x] Fix: Navigator spoofing reducido (causaba redirect loops en sitios enterprise como Broadcom)
 - [x] Detección de sitios de videoconferencia (Meet, Zoom, Teams)
-- [x] Banner "Abrir en Chrome" para compartir pantalla (WebKit limitation con iPad Sidecar)
-- [x] Apertura automática en Chrome/navegador externo
+- [x] ~~Banner "Abrir en Chrome"~~ → Reemplazado por motor Chromium integrado (v0.4.0)
 
-### Fase 2 Futura: Motor Híbrido (CEF)
-- [ ] Integración de Chromium Embedded Framework (CEF) para videoconferencias
-- [ ] WebKit para navegación general, Chromium solo para Meet/Zoom/Teams
-- [ ] Compartir pantalla completa con iPad Sidecar via Chromium
-- [ ] Optimización de RAM para motor dual
+### Motor Híbrido CEF (v0.4.0) ✅
+- [x] Integración de Chromium Embedded Framework (CEF 145.0.23, Chromium 145)
+- [x] WebKit para navegación general, Chromium solo para Meet/Zoom/Teams
+- [x] Auto-detección de dominios de videoconferencia → cambio automático de motor
+- [x] Wrapper Objective-C++ (CEFBridge) con API Swift limpia
+- [x] CEFWebView NSViewRepresentable para integración SwiftUI
+- [x] Helper subprocess para CEF (MAI Helper.app)
+- [x] Permisos de media auto-concedidos para videoconferencias
+- [x] Indicador "Chromium" en barra cuando el tab usa CEF
+- [x] Build system actualizado (Makefile + SPM mixto)
+- [ ] Testing screen sharing con iPad Sidecar
+- [ ] Optimización de RAM con motor dual activo
+
+### Screen/Window Picker Nativo (v0.4.1) ✅
+- [x] Picker nativo con NSAlert + NSPopUpButton (reemplaza picker de Chrome no funcional en embedded mode)
+- [x] Enumeración de pantallas y ventanas via ScreenCaptureKit (SCShareableContent)
+- [x] Compartir pantalla completa via auto-select flag + real getDisplayMedia()
+- [x] Compartir ventanas individuales via SCStream → canvas relay → Meet
+- [x] JSDialog handler intercepta window.prompt('MAI_SCREEN_PICKER')
+- [x] JS override de navigator.mediaDevices.getDisplayMedia() en sitios de videoconferencia
+- [x] Canvas captureStream(5fps) con displaySurface metadata falsa + audio track silencioso
+- [x] Captura nativa SCStream a 640x360, 5fps, JPEG 0.3 quality → base64 → executeJavaScript
+- [x] Filtrado de ventanas (excluye MAI, ventanas pequeñas, sin título)
+- [x] Frameworks: ScreenCaptureKit, CoreMedia, CoreImage vinculados en Package.swift
 
 ## Fase 2: Funcionalidades Core (Q3 2026)
 
@@ -169,10 +187,12 @@
 
 | Métrica | Valor |
 |---------|-------|
-| RAM promedio | ~167 MB (vs Chrome 2.5+ GB) |
-| Archivos Swift | 12 |
-| Líneas de código | ~2,800 |
+| RAM promedio | ~167 MB WebKit / ~400 MB con CEF |
+| Archivos Swift | 14 |
+| Archivos ObjC++ | 2 |
+| Líneas de código | ~3,800+ |
+| CEF Framework | 292 MB (Chromium 145) |
 
 ---
 
-**Última actualización: 2026-02-15 (v0.3.1)**
+**Última actualización: 2026-02-17 (v0.4.1)**

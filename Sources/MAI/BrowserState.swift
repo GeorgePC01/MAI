@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import Combine
+import CEFWrapper
 
 /// Estado global del navegador
 class BrowserState: ObservableObject {
@@ -81,6 +82,14 @@ class BrowserState: ObservableObject {
 
     func closeTab(at index: Int) {
         guard tabs.count > 1 else { return }  // Mantener al menos 1 tab
+
+        // If closing a Chromium tab, release CEF browser
+        let closingTab = tabs[index]
+        if closingTab.useChromiumEngine {
+            CEFBridge.closeBrowser()
+            print("🔄 CEF browser closed for tab: \(closingTab.title)")
+        }
+
         tabs.remove(at: index)
 
         if currentTabIndex >= tabs.count {
@@ -124,6 +133,17 @@ class BrowserState: ObservableObject {
         if let extractedURL = extractSafeLinksURL(from: finalURL) {
             print("🔗 SafeLinks detectado, redirigiendo a: \(extractedURL)")
             finalURL = extractedURL
+        }
+
+        // Auto-detect video conferencing domains → use Chromium engine
+        let shouldUseChromium = Self.shouldUseChromiumEngine(for: finalURL)
+        if shouldUseChromium != tab.useChromiumEngine {
+            tab.useChromiumEngine = shouldUseChromium
+            if shouldUseChromium {
+                print("🔄 Switching to Chromium engine for: \(finalURL)")
+            } else {
+                print("🔄 Switching back to WebKit engine")
+            }
         }
 
         tab.navigate(to: finalURL)
@@ -415,9 +435,9 @@ class BrowserState: ObservableObject {
         showFindInPage = false
     }
 
-    // MARK: - External Browser (Video Conferencing)
+    // MARK: - CEF Hybrid Engine (Video Conferencing)
 
-    /// Dominios de videoconferencia que funcionan mejor en Chrome
+    /// Dominios de videoconferencia que usan Chromium engine
     private static let videoConferenceDomains: Set<String> = [
         "meet.google.com",
         "zoom.us",
@@ -426,11 +446,22 @@ class BrowserState: ObservableObject {
         "teams.live.com"
     ]
 
+    /// Determina si una URL debería usar Chromium engine
+    static func shouldUseChromiumEngine(for urlString: String) -> Bool {
+        guard let url = URL(string: urlString),
+              let host = url.host?.lowercased() else { return false }
+        return videoConferenceDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
     /// Verifica si la URL actual es un sitio de videoconferencia
     var isVideoConferenceSite: Bool {
-        guard let url = currentTab?.url,
-              let host = URL(string: url)?.host?.lowercased() else { return false }
-        return Self.videoConferenceDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+        guard let url = currentTab?.url else { return false }
+        return Self.shouldUseChromiumEngine(for: url)
+    }
+
+    /// Verifica si el tab actual usa Chromium engine
+    var isCurrentTabChromium: Bool {
+        currentTab?.useChromiumEngine ?? false
     }
 
     /// Nombre del servicio de videoconferencia actual
@@ -441,45 +472,6 @@ class BrowserState: ObservableObject {
         if host.contains("zoom") { return "Zoom" }
         if host.contains("teams") { return "Microsoft Teams" }
         return "Videoconferencia"
-    }
-
-    /// Abre la URL actual en un navegador externo (Chrome preferido)
-    func openInExternalBrowser() {
-        guard let urlString = currentTab?.url,
-              let url = URL(string: urlString) else { return }
-
-        // Intentar abrir en Chrome primero
-        let chromeURL = URL(fileURLWithPath: "/Applications/Google Chrome.app")
-        if FileManager.default.fileExists(atPath: chromeURL.path) {
-            NSWorkspace.shared.open(
-                [url],
-                withApplicationAt: chromeURL,
-                configuration: NSWorkspace.OpenConfiguration()
-            ) { _, error in
-                if let error = error {
-                    print("Error abriendo Chrome: \(error)")
-                    // Fallback: abrir en navegador por defecto
-                    NSWorkspace.shared.open(url)
-                }
-            }
-        } else {
-            // Sin Chrome, abrir en navegador por defecto del sistema
-            NSWorkspace.shared.open(url)
-        }
-    }
-
-    /// El usuario descartó el banner de videoconferencia para esta tab
-    @Published var dismissedVideoConferenceBanner: Set<UUID> = []
-
-    func dismissVideoConferenceBanner() {
-        guard let tabId = currentTab?.id else { return }
-        dismissedVideoConferenceBanner.insert(tabId)
-    }
-
-    var shouldShowVideoConferenceBanner: Bool {
-        guard isVideoConferenceSite,
-              let tabId = currentTab?.id else { return false }
-        return !dismissedVideoConferenceBanner.contains(tabId)
     }
 
     // MARK: - Zoom
@@ -550,6 +542,9 @@ class Tab: ObservableObject, Identifiable {
     @Published var suspendedSnapshot: NSImage?
     @Published var lastInteraction: Date = Date()
     var scrollPosition: CGPoint = .zero
+
+    // CEF Hybrid Engine - true when tab uses Chromium (video conferencing)
+    @Published var useChromiumEngine: Bool = false
 
     weak var webView: WKWebView?
 
