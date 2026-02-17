@@ -283,6 +283,8 @@ static void init_life_span_handler() {
 
 // Forward declarations for window capture (defined after Permission Handler)
 static BOOL g_isCapturing = NO;
+static BOOL g_framePending = NO;
+static float g_jpegQuality = 0.85;
 static void stopWindowCapture(void);
 
 // MARK: - Load Handler
@@ -323,13 +325,13 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                                 "try{"
                                     "console.log('[MAI] Creating canvas stream for window capture');"
                                     "const cv=document.createElement('canvas');"
-                                    "cv.width=640;cv.height=360;"
+                                    "cv.width=1280;cv.height=720;"
                                     "const cx=cv.getContext('2d');"
                                     // Draw initial black frame so stream is never empty
                                     "cx.fillStyle='#000';"
-                                    "cx.fillRect(0,0,640,360);"
-                                    "cx.fillStyle='#fff';cx.font='20px sans-serif';"
-                                    "cx.fillText('Connecting...',240,180);"
+                                    "cx.fillRect(0,0,1280,720);"
+                                    "cx.fillStyle='#fff';cx.font='24px sans-serif';"
+                                    "cx.fillText('Connecting...',560,360);"
                                     // captureStream(5) = auto-produce frames at 5fps
                                     "const st=cv.captureStream(5);"
                                     "const vt=st.getVideoTracks()[0];"
@@ -361,20 +363,36 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                                         "});"
                                     "}catch(ae){console.warn('[MAI] Audio track failed:',ae);}"
                                     // Frame receiver from native SCStream capture
+                                    // Use 'copy' compositing to replace pixels with full opacity
+                                    "cx.globalCompositeOperation='copy';"
                                     "window.__maiFrame=function(d){"
                                         "const im=new Image();"
                                         "im.onload=function(){"
                                             "if(cv.width!==im.width||cv.height!==im.height){"
                                                 "cv.width=im.width;cv.height=im.height;"
+                                                "cx.globalCompositeOperation='copy';"
                                             "}"
                                             "cx.drawImage(im,0,0);"
                                         "};"
                                         "im.src='data:image/jpeg;base64,'+d;"
                                     "};"
-                                    "vt.addEventListener('ended',function(){"
-                                        "console.log('[MAI] Window track ended');"
+                                    // Cleanup function to stop native capture
+                                    "function _maiCleanup(){"
+                                        "console.log('[MAI] Cleaning up window capture');"
+                                        "clearInterval(_maiCheck);"
                                         "delete window.__maiFrame;"
                                         "try{window.prompt('MAI_STOP_CAPTURE');}catch(e){}"
+                                    "}"
+                                    // Periodic check: if track died or was removed, stop capture
+                                    "const _maiCheck=setInterval(function(){"
+                                        "if(vt.readyState!=='live'){"
+                                            "console.log('[MAI] Track no longer live, state:', vt.readyState);"
+                                            "_maiCleanup();"
+                                        "}"
+                                    "},2000);"
+                                    "vt.addEventListener('ended',function(){"
+                                        "console.log('[MAI] Window track ended event');"
+                                        "_maiCleanup();"
                                     "});"
                                     "console.log('[MAI] Returning stream with',st.getTracks().length,'tracks');"
                                     "return st;"
@@ -560,6 +578,8 @@ static CIContext* g_ciContext = nil;
 static void stopWindowCapture(void) {
     if (g_captureStream) {
         g_isCapturing = NO;
+        g_framePending = NO;
+        g_jpegQuality = 0.85;
         [g_captureStream stopCaptureWithCompletionHandler:^(NSError* error) {
             cef_log_to_file("Window capture stopped");
         }];
@@ -573,8 +593,8 @@ static void startWindowCapture(SCWindow* window) {
 
     SCContentFilter* filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
     SCStreamConfiguration* config = [[SCStreamConfiguration alloc] init];
-    config.width = 640;
-    config.height = 360;
+    config.width = 1280;
+    config.height = 720;
     config.minimumFrameInterval = CMTimeMake(1, 5); // 5 fps
     config.pixelFormat = kCVPixelFormatType_32BGRA;
     config.showsCursor = YES;
@@ -616,16 +636,22 @@ static void startWindowCapture(SCWindow* window) {
     if (type != SCStreamOutputTypeScreen) return;
     if (!g_browser || !g_isCapturing) return;
 
+    // Adaptive: if previous frame still pending on main queue, skip & reduce quality
+    if (g_framePending) {
+        if (g_jpegQuality > 0.4) g_jpegQuality -= 0.05;
+        return; // Drop frame
+    }
+
     CVPixelBufferRef pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer);
     if (!pixelBuffer) return;
 
-    // Convert to JPEG using reusable CIContext
-    if (!g_ciContext) g_ciContext = [CIContext context];
+    // Convert to JPEG using reusable CIContext with adaptive quality
+    if (!g_ciContext) g_ciContext = [CIContext contextWithOptions:@{kCIContextWorkingColorSpace: (__bridge id)CGColorSpaceCreateWithName(kCGColorSpaceSRGB)}];
     CIImage* ciImage = [CIImage imageWithCVPixelBuffer:pixelBuffer];
-    CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
+    CGColorSpaceRef cs = CGColorSpaceCreateWithName(kCGColorSpaceSRGB);
     NSData* jpegData = [g_ciContext JPEGRepresentationOfImage:ciImage
                                                    colorSpace:cs
-                                                      options:@{(id)kCGImageDestinationLossyCompressionQuality: @0.3}];
+                                                      options:@{(id)kCGImageDestinationLossyCompressionQuality: @(g_jpegQuality)}];
     CGColorSpaceRelease(cs);
     if (!jpegData) return;
 
@@ -635,15 +661,18 @@ static void startWindowCapture(SCWindow* window) {
     static int frameCount = 0;
     frameCount++;
     if (frameCount == 1 || frameCount % 25 == 0) {
-        cef_log_to_file("Window capture: Frame %d sent, JPEG=%lu bytes, base64=%lu chars",
-                        frameCount, (unsigned long)jpegData.length, (unsigned long)base64.length);
+        cef_log_to_file("Window capture: Frame %d, quality=%.2f, JPEG=%lu bytes, base64=%lu chars",
+                        frameCount, g_jpegQuality, (unsigned long)jpegData.length, (unsigned long)base64.length);
     }
 
+    g_framePending = YES;
     dispatch_async(dispatch_get_main_queue(), ^{
-        if (!g_browser || !g_isCapturing) return;
+        if (!g_browser || !g_isCapturing) { g_framePending = NO; return; }
 
         NSString* js = [NSString stringWithFormat:
             @"window.__maiFrame&&window.__maiFrame('%@')", base64];
+        // Frame delivered - increase quality towards max
+        if (g_jpegQuality < 0.85) g_jpegQuality += 0.02;
         cef_frame_t* frame = g_browser->get_main_frame(g_browser);
         if (frame) {
             cef_string_t script = cef_string_from_nsstring(js);
@@ -653,6 +682,7 @@ static void startWindowCapture(SCWindow* window) {
             cef_string_clear(&url);
             cef_release(&frame->base);
         }
+        g_framePending = NO;
     });
 }
 
