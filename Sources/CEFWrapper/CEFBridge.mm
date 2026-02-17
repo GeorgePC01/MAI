@@ -323,13 +323,13 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                                 "try{"
                                     "console.log('[MAI] Creating canvas stream for window capture');"
                                     "const cv=document.createElement('canvas');"
-                                    "cv.width=640;cv.height=360;"
+                                    "cv.width=1280;cv.height=720;"
                                     "const cx=cv.getContext('2d');"
                                     // Draw initial black frame so stream is never empty
                                     "cx.fillStyle='#000';"
-                                    "cx.fillRect(0,0,640,360);"
-                                    "cx.fillStyle='#fff';cx.font='20px sans-serif';"
-                                    "cx.fillText('Connecting...',240,180);"
+                                    "cx.fillRect(0,0,1280,720);"
+                                    "cx.fillStyle='#fff';cx.font='24px sans-serif';"
+                                    "cx.fillText('Connecting...',560,360);"
                                     // captureStream(5) = auto-produce frames at 5fps
                                     "const st=cv.captureStream(5);"
                                     "const vt=st.getVideoTracks()[0];"
@@ -573,8 +573,8 @@ static void startWindowCapture(SCWindow* window) {
 
     SCContentFilter* filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
     SCStreamConfiguration* config = [[SCStreamConfiguration alloc] init];
-    config.width = 640;
-    config.height = 360;
+    config.width = 1280;
+    config.height = 720;
     config.minimumFrameInterval = CMTimeMake(1, 5); // 5 fps
     config.pixelFormat = kCVPixelFormatType_32BGRA;
     config.showsCursor = YES;
@@ -625,7 +625,7 @@ static void startWindowCapture(SCWindow* window) {
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     NSData* jpegData = [g_ciContext JPEGRepresentationOfImage:ciImage
                                                    colorSpace:cs
-                                                      options:@{(id)kCGImageDestinationLossyCompressionQuality: @0.3}];
+                                                      options:@{(id)kCGImageDestinationLossyCompressionQuality: @0.5}];
     CGColorSpaceRelease(cs);
     if (!jpegData) return;
 
