@@ -17,7 +17,7 @@
     <!-- Keychain para almacenar credenciales -->
     <key>com.apple.security.keychain-access-groups</key>
     <array>
-        <string>$(AppIdentifierPrefix)com.mai.browser</string>
+        <string>com.mai.browser</string>
     </array>
 
     <!-- Cámara (para videollamadas y Face ID) -->

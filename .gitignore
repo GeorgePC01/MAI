@@ -63,6 +63,11 @@ Package.resolved
 *.mlmodel
 *.mlpackage
 
+# CEF Framework (292 MB, download separately)
+Frameworks/Chromium Embedded Framework.framework/
+Frameworks/CEF/
+Frameworks/libcef_dll/
+
 # User data (testing)
 UserData/
 Profiles/

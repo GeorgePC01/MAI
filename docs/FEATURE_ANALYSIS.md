@@ -24,7 +24,7 @@ Este documento analiza qué funcionalidades aportan valor real a MAI Browser ver
 | Buscar en página (Cmd+F) | ✅ | ★★★★☆ |
 | Descargas funcionales | ✅ | ★★★★☆ |
 | Tab suspension manual | ✅ | ★★★☆☆ |
-| Banner videoconferencia | ✅ | ★★★☆☆ |
+| Motor híbrido CEF | ✅ | ★★★★★ |
 | Fullscreen video | ✅ | ★★★☆☆ |
 | Keyboard shortcuts | ✅ | ★★★☆☆ |
 
@@ -341,7 +341,9 @@ Estado:       ✅ Fase 1 completada (manual)
 | v0.2.1 | 2026-02-13 | Find in page, tab suspension, OAuth popups, downloads, cámara/micrófono, SafeLinks |
 | v0.3.0 | 2026-02-15 | Multi-ventana (Cmd+N), file upload (NSOpenPanel) |
 | v0.3.1 | 2026-02-15 | Banner videoconferencia, fix about:blank, fix navigator spoofing |
+| v0.4.0 | 2026-02-15 | Motor híbrido CEF - Chromium para videoconferencias (Meet/Zoom/Teams) |
+| v0.4.1 | 2026-02-17 | Screen/window picker nativo + compartir ventanas individuales via ScreenCaptureKit |
 
 ---
 
-*Última actualización: 2026-02-15*
+*Última actualización: 2026-02-17 (v0.4.1)*

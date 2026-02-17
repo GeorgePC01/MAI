@@ -1,0 +1,4 @@
+module CEFWrapper {
+    header "CEFBridge.h"
+    export *
+}
