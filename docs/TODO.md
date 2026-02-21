@@ -103,6 +103,52 @@
 - [x] Filtrado de ventanas (excluye MAI, ventanas pequeñas, sin título)
 - [x] Frameworks: ScreenCaptureKit, CoreMedia, CoreImage vinculados en Package.swift
 
+### CEF con Codecs Propietarios / Teams Screen Sharing (v0.5.0) ⏳
+- **Problema**: Teams requiere H.264 para screen sharing (VBSS). CEF estándar no incluye H.264.
+- **Referencia**: CEF Issue #3910 (confirmado), CEF Issue #3559 (hardware-only via VideoToolbox)
+- **Build machine**: Mac Mini 2018, Intel 64GB RAM, macOS 15.7.4, Xcode 16.3
+- [ ] Instalar depot_tools en Mac Mini (`git clone chromium tools/depot_tools`)
+- [ ] Descargar automate-git.py de CEF
+- [ ] Compilar CEF branch 7632 con `GN_DEFINES="is_official_build=true proprietary_codecs=true ffmpeg_branding=Chrome"` + `symbol_level=0`
+- [ ] Cross-compilar para ARM64 (`--arm64-build` o `target_cpu="arm64"`)
+- [ ] Copiar framework resultante al MacBook Pro M2 Pro
+- [ ] Reemplazar `Frameworks/Chromium Embedded Framework.framework/` en MAI
+- [ ] Eliminar JS codec spoofing de CEFBridge.mm (H.264 spoof, SDP removal, setCodecPreferences injection, permissions spoof, displaySurface spoof)
+- [ ] Verificar screen sharing funcional en Teams, Meet y Zoom
+- [ ] Medir impacto en RAM con nuevo framework
+
+## Fase 1.5: Preparación para Lanzamiento (Q2 2026)
+
+### Modelo de Negocio (Freemium)
+
+**Versión Gratuita (Free):**
+- Navegación WebKit completa (tabs, favoritos, historial, descargas)
+- Privacidad (tracker/ad blocking)
+- Find in page, multi-ventana
+- Tab suspension manual
+
+**Versión Pro (Pago):**
+- [ ] Motor híbrido CEF (videoconferencias Meet/Zoom/Teams)
+- [ ] Screen/window sharing HD (VideoFrame API - sin doble compresión)
+- [ ] Gestor de contraseñas (macOS Keychain)
+- [ ] Tab suspension inteligente (ML)
+- [ ] Detección de phishing
+- [ ] Soporte prioritario
+
+### Calidad HD de Screen Sharing (Pro)
+- [ ] VideoFrame API: eliminar canvas intermediario, inyectar frames directamente
+- [ ] WebSocket binario: eliminar overhead base64 (33% menos datos)
+- [ ] Calidad nativa: compresión única VP9 (igual que Chrome)
+- [ ] Estimación de esfuerzo: 3-5 días
+
+### Lanzamiento
+- [ ] Landing page (sitio web con demo/screenshots)
+- [ ] Apple Developer Account ($99/año)
+- [ ] Notarización de la app
+- [ ] Procesador de pagos (Stripe o Paddle)
+- [ ] Beta pública (TestFlight o descarga directa)
+- [ ] App Store (post-beta)
+
 ## Fase 2: Funcionalidades Core (Q3 2026)
 
 ### ML Integration
@@ -195,4 +241,4 @@
 
 ---
 
-**Última actualización: 2026-02-17 (v0.4.1)**
+**Última actualización: 2026-02-17 (v0.4.2)**

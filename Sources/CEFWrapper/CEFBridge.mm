@@ -17,6 +17,8 @@
 #include "include/capi/cef_request_handler_capi.h"
 #include "include/capi/cef_browser_process_handler_capi.h"
 #include "include/capi/cef_jsdialog_handler_capi.h"
+// NOTE: Views framework headers removed — Views is incompatible with
+// external_message_pump=1 on macOS (requires MessagePumpNSApplication).
 #include "include/cef_api_hash.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -52,6 +54,14 @@ static cef_browser_t* g_browser = NULL;
 static NSView* g_browserView = NULL;
 static NSTimer* g_messagePumpTimer = nil;
 static __weak id<CEFBridgeDelegate> g_delegate = nil;
+
+// Standalone mode: Teams in its own NSWindow (still Alloy-style, but separate window)
+static BOOL g_isStandaloneMode = NO;
+static NSWindow* g_standaloneNSWindow = nil;
+
+// Forward declarations
+static void stopMessagePump(void);
+static void startMessagePump(void);
 
 // MARK: - Reference Counting Helpers
 
@@ -258,12 +268,26 @@ static int CEF_CALLBACK do_close(cef_life_span_handler_t* self,
 
 static void CEF_CALLBACK on_before_close(cef_life_span_handler_t* self,
                                           cef_browser_t* browser) {
-    NSLog(@"[CEF] Browser closed");
+    NSLog(@"[CEF] Browser closed (standalone=%d)", g_isStandaloneMode);
     if (g_browser) {
         cef_release(&g_browser->base);
         g_browser = NULL;
     }
     g_browserView = nil;
+
+    // Close standalone NSWindow if present
+    if (g_isStandaloneMode && g_standaloneNSWindow) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [g_standaloneNSWindow close];
+            g_standaloneNSWindow = nil;
+        });
+        g_isStandaloneMode = NO;
+    }
+
+    // Stop message pump - no browser to service.
+    // CRITICAL: Must stop here to prevent cef_do_message_loop_work() from
+    // accessing deallocated NSViews (causes unrecognized selector crash).
+    stopMessagePump();
 
     dispatch_async(dispatch_get_main_queue(), ^{
         id<CEFBridgeDelegate> delegate = g_delegate;
@@ -305,105 +329,275 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                 NSString* urlStr = nsstring_from_cef_string(frameUrl);
                 if ([urlStr containsString:@"meet.google.com"] ||
                     [urlStr containsString:@"zoom.us"] ||
-                    [urlStr containsString:@"teams.microsoft.com"]) {
+                    [urlStr containsString:@"teams.microsoft.com"] ||
+                    [urlStr containsString:@"teams.live.com"]) {
 
-                    NSString* js =
+                    // Common JS: error handlers, codec diagnostics, H.264 SDP removal,
+                    // and WebRTC interceptors for logging.
+                    // In standalone Chrome-style mode: NO getDisplayMedia override
+                    // (Chrome's native DesktopMediaPicker works).
+                    // In embedded Alloy mode: getDisplayMedia override with native
+                    // picker + getUserMedia fallback.
+                    NSMutableString* js = [NSMutableString stringWithString:
                         @"(function(){"
                         "if(window.__maiPickerInstalled)return;"
                         "window.__maiPickerInstalled=true;"
-                        "console.log('[MAI] Installing getDisplayMedia override');"
-                        "const real=navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);"
-                        "navigator.mediaDevices.getDisplayMedia=async function(c){"
-                            "console.log('[MAI] getDisplayMedia intercepted, constraints:', JSON.stringify(c));"
-                            "const s=window.prompt('MAI_SCREEN_PICKER');"
-                            "console.log('[MAI] Picker result:', s);"
-                            "if(!s)throw new DOMException('Permission denied','NotAllowedError');"
-                            "if(s==='SCREEN'){"
-                                "console.log('[MAI] Calling real getDisplayMedia for screen');"
-                                "return real.call(navigator.mediaDevices,c);"
-                            "}else if(s==='WINDOW'){"
-                                "try{"
-                                    "console.log('[MAI] Creating canvas stream for window capture');"
-                                    "const cv=document.createElement('canvas');"
-                                    "cv.width=1280;cv.height=720;"
-                                    "const cx=cv.getContext('2d');"
-                                    // Draw initial black frame so stream is never empty
-                                    "cx.fillStyle='#000';"
-                                    "cx.fillRect(0,0,1280,720);"
-                                    "cx.fillStyle='#fff';cx.font='24px sans-serif';"
-                                    "cx.fillText('Connecting...',560,360);"
-                                    // captureStream(5) = auto-produce frames at 5fps
-                                    "const st=cv.captureStream(5);"
-                                    "const vt=st.getVideoTracks()[0];"
-                                    "console.log('[MAI] Canvas track created, state:', vt.readyState,"
-                                        "'settings:', JSON.stringify(vt.getSettings()));"
-                                    // Override getSettings to fake displaySurface metadata
-                                    "const origGS=vt.getSettings.bind(vt);"
-                                    "vt.getSettings=function(){"
-                                        "const r=origGS();"
-                                        "r.displaySurface='window';"
-                                        "r.logicalSurface=true;"
-                                        "r.cursor='always';"
-                                        "return r;"
-                                    "};"
-                                    // Add silent audio track (Meet may require audio)
-                                    "try{"
-                                        "const actx=new AudioContext();"
-                                        "const osc=actx.createOscillator();"
-                                        "const gn=actx.createGain();"
-                                        "gn.gain.value=0;"
-                                        "osc.connect(gn);"
-                                        "const dest=actx.createMediaStreamDestination();"
-                                        "gn.connect(dest);"
-                                        "osc.start();"
-                                        "st.addTrack(dest.stream.getAudioTracks()[0]);"
-                                        "console.log('[MAI] Added silent audio track');"
-                                        "vt.addEventListener('ended',function(){"
-                                            "actx.close();"
-                                        "});"
-                                    "}catch(ae){console.warn('[MAI] Audio track failed:',ae);}"
-                                    // Frame receiver from native SCStream capture
-                                    // Use 'copy' compositing to replace pixels with full opacity
-                                    "cx.globalCompositeOperation='copy';"
-                                    "window.__maiFrame=function(d){"
-                                        "const im=new Image();"
-                                        "im.onload=function(){"
-                                            "if(cv.width!==im.width||cv.height!==im.height){"
-                                                "cv.width=im.width;cv.height=im.height;"
-                                                "cx.globalCompositeOperation='copy';"
-                                            "}"
-                                            "cx.drawImage(im,0,0);"
-                                        "};"
-                                        "im.src='data:image/jpeg;base64,'+d;"
-                                    "};"
-                                    // Cleanup function to stop native capture
-                                    "function _maiCleanup(){"
-                                        "console.log('[MAI] Cleaning up window capture');"
-                                        "clearInterval(_maiCheck);"
-                                        "delete window.__maiFrame;"
-                                        "try{window.prompt('MAI_STOP_CAPTURE');}catch(e){}"
+                        "console.log('[MAI] Installing WebRTC patches (standalone=%s)'.replace('%s',"];
+
+                    // Inject standalone mode flag as JS boolean
+                    [js appendFormat:@"'%@'));", g_isStandaloneMode ? @"true" : @"false"];
+
+                    [js appendString:
+                        // Global error catcher with stack traces
+                        @"if(!window.__maiErrorHandler){"
+                            "window.__maiErrorHandler=true;"
+                            "window.addEventListener('unhandledrejection',function(e){"
+                                "const r=e.reason;"
+                                "if(r&&r.stack)console.log('[MAI] UNHANDLED REJECTION:',r.message,'\\n'+r.stack);"
+                            "});"
+                            "window.addEventListener('error',function(e){"
+                                "if(e.error&&e.error.stack)console.log('[MAI] GLOBAL ERROR:',e.error.message,'\\n'+e.error.stack);"
+                            "});"
+                        "}"
+
+                        // === SPOOF 1: Add H.264 to RTCRtpSender/Receiver.getCapabilities ===
+                        // Teams checks for H.264 support before attempting screen sharing.
+                        // Our CEF build lacks proprietary codecs, so we fake H.264 in
+                        // getCapabilities. The actual SDP negotiation will strip H.264
+                        // (see maiRemoveH264 below), forcing VP9/AV1 fallback.
+                        "if(!window.__maiCodecSpoofed){"
+                            "window.__maiCodecSpoofed=true;"
+                            "const h264Codecs=["
+                                "{mimeType:'video/H264',clockRate:90000,sdpFmtpLine:'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42001f'},"
+                                "{mimeType:'video/H264',clockRate:90000,sdpFmtpLine:'level-asymmetry-allowed=1;packetization-mode=0;profile-level-id=42001f'},"
+                                "{mimeType:'video/H264',clockRate:90000,sdpFmtpLine:'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f'},"
+                                "{mimeType:'video/H264',clockRate:90000,sdpFmtpLine:'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=4d001f'},"
+                                "{mimeType:'video/H264',clockRate:90000,sdpFmtpLine:'level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=640032'}"
+                            "];"
+                            "const origSenderCaps=RTCRtpSender.getCapabilities;"
+                            "RTCRtpSender.getCapabilities=function(kind){"
+                                "const caps=origSenderCaps.call(this,kind);"
+                                "if(kind==='video'&&caps&&caps.codecs){"
+                                    "const hasH264=caps.codecs.some(c=>c.mimeType.includes('264'));"
+                                    "if(!hasH264){"
+                                        "caps.codecs=[...h264Codecs,...caps.codecs];"
+                                        "console.log('[MAI] Spoofed H.264 into Sender.getCapabilities');"
                                     "}"
-                                    // Periodic check: if track died or was removed, stop capture
-                                    "const _maiCheck=setInterval(function(){"
-                                        "if(vt.readyState!=='live'){"
-                                            "console.log('[MAI] Track no longer live, state:', vt.readyState);"
-                                            "_maiCleanup();"
-                                        "}"
-                                    "},2000);"
-                                    "vt.addEventListener('ended',function(){"
-                                        "console.log('[MAI] Window track ended event');"
-                                        "_maiCleanup();"
-                                    "});"
-                                    "console.log('[MAI] Returning stream with',st.getTracks().length,'tracks');"
-                                    "return st;"
-                                "}catch(e){"
-                                    "console.error('[MAI] Window capture JS error:',e);"
-                                    "throw e;"
                                 "}"
+                                "return caps;"
+                            "};"
+                            "const origRecvCaps=RTCRtpReceiver.getCapabilities;"
+                            "RTCRtpReceiver.getCapabilities=function(kind){"
+                                "const caps=origRecvCaps.call(this,kind);"
+                                "if(kind==='video'&&caps&&caps.codecs){"
+                                    "const hasH264=caps.codecs.some(c=>c.mimeType.includes('264'));"
+                                    "if(!hasH264){"
+                                        "caps.codecs=[...h264Codecs,...caps.codecs];"
+                                        "console.log('[MAI] Spoofed H.264 into Receiver.getCapabilities');"
+                                    "}"
+                                "}"
+                                "return caps;"
+                            "};"
+                            "console.log('[MAI] H.264 codec spoofing installed');"
+                        "}"
+
+                        // === SPOOF 2: navigator.permissions.query for display-capture ===
+                        // CEF Alloy may return 'denied' for display-capture permission.
+                        // Teams checks this before calling getDisplayMedia.
+                        "if(!window.__maiPermSpoofed){"
+                            "window.__maiPermSpoofed=true;"
+                            "const origQuery=navigator.permissions.query.bind(navigator.permissions);"
+                            "navigator.permissions.query=function(desc){"
+                                "console.log('[MAI] permissions.query:', JSON.stringify(desc));"
+                                "if(desc&&desc.name==='display-capture'){"
+                                    "console.log('[MAI] Spoofing display-capture permission to prompt');"
+                                    "return Promise.resolve({state:'prompt',name:'display-capture',onchange:null});"
+                                "}"
+                                "return origQuery(desc);"
+                            "};"
+                            "console.log('[MAI] Permission spoofing installed');"
+                        "}"
+
+                        // === SPOOF 3: MediaStreamTrack.getSettings displaySurface ===
+                        // Teams may check for displaySurface property in track settings.
+                        "if(!window.__maiTrackSpoofed){"
+                            "window.__maiTrackSpoofed=true;"
+                            "const origGetSettings=MediaStreamTrack.prototype.getSettings;"
+                            "MediaStreamTrack.prototype.getSettings=function(){"
+                                "const s=origGetSettings.call(this);"
+                                "if(this.kind==='video'&&this.label&&this.label.includes('Screen')&&!s.displaySurface){"
+                                    "s.displaySurface='monitor';"
+                                    "s.cursor='always';"
+                                    "console.log('[MAI] Added displaySurface to track settings:', JSON.stringify(s));"
+                                "}"
+                                "return s;"
+                            "};"
+                        "}"
+
+                        // Log available WebRTC codecs once for diagnostics (AFTER spoofing)
+                        "try{"
+                            "const vc=RTCRtpSender.getCapabilities('video');"
+                            "if(vc&&vc.codecs){"
+                                "const names=[...new Set(vc.codecs.map(c=>c.mimeType))];"
+                                "console.log('[MAI] WebRTC video codecs (with spoof):', names.join(', '));"
+                                "console.log('[MAI] H264 available:', names.some(n=>n.includes('264')));"
                             "}"
-                            "return real.call(navigator.mediaDevices,c);"
-                        "};"
-                        "})();";
+                        "}catch(e){console.warn('[MAI] Codec check failed:', e);}"
+
+                        // Intercept RTCPeerConnection — remove H.264 from SDP since our CEF
+                        // build lacks proprietary codecs. Forces VP9/AV1 negotiation instead.
+                        "if(!window.__maiRTCPatched){"
+                            "window.__maiRTCPatched=true;"
+
+                            // Helper: remove H.264 codec lines from SDP
+                            "function maiRemoveH264(sdp){"
+                                "const lines=sdp.split('\\r\\n');"
+                                "const h264pts=new Set();"
+                                "lines.forEach(l=>{"
+                                    "const m=l.match(/^a=rtpmap:(\\d+)\\s+H264\\//i);"
+                                    "if(m)h264pts.add(m[1]);"
+                                "});"
+                                "if(h264pts.size===0)return sdp;"
+                                "console.log('[MAI] Removing H.264 payload types:', [...h264pts].join(','));"
+                                "const rtxPts=new Set();"
+                                "lines.forEach(l=>{"
+                                    "const m=l.match(/^a=fmtp:(\\d+)\\s+apt=(\\d+)/);"
+                                    "if(m&&h264pts.has(m[2]))rtxPts.add(m[1]);"
+                                "});"
+                                "const removePts=new Set([...h264pts,...rtxPts]);"
+                                "const filtered=lines.filter(l=>{"
+                                    "for(const pt of removePts){"
+                                        "if(l.match(new RegExp('^a=rtpmap:'+pt+'\\\\s')))return false;"
+                                        "if(l.match(new RegExp('^a=rtcp-fb:'+pt+'\\\\s')))return false;"
+                                        "if(l.match(new RegExp('^a=fmtp:'+pt+'\\\\s')))return false;"
+                                    "}"
+                                    "return true;"
+                                "});"
+                                "const result=filtered.map(l=>{"
+                                    "if(l.startsWith('m=video')){"
+                                        "const parts=l.split(' ');"
+                                        "const cleaned=parts.filter((p,i)=>i<3||!removePts.has(p));"
+                                        "return cleaned.join(' ');"
+                                    "}"
+                                    "return l;"
+                                "});"
+                                "return result.join('\\r\\n');"
+                            "}"
+
+                            "const origSetLocal=RTCPeerConnection.prototype.setLocalDescription;"
+                            "RTCPeerConnection.prototype.setLocalDescription=function(desc){"
+                                "if(desc&&desc.sdp){"
+                                    "const h264Count=desc.sdp.split('\\n').filter(l=>/H264/i.test(l)).length;"
+                                    "if(h264Count>0){"
+                                        "console.log('[MAI] SDP '+desc.type+': removing '+h264Count+' H264 lines');"
+                                        "desc=Object.assign({},desc,{sdp:maiRemoveH264(desc.sdp)});"
+                                    "}"
+                                    "const codecs=desc.sdp.split('\\n').filter(l=>/^a=rtpmap/.test(l)).map(l=>l.split(' ')[1]);"
+                                    "console.log('[MAI] setLocalDescription('+desc.type+') codecs:', codecs.join(', '));"
+                                "}"
+                                "return origSetLocal.apply(this,[desc]);"
+                            "};"
+
+                            "const origSetRemote=RTCPeerConnection.prototype.setRemoteDescription;"
+                            "RTCPeerConnection.prototype.setRemoteDescription=function(desc){"
+                                "if(desc&&desc.sdp){"
+                                    "const h264Count=desc.sdp.split('\\n').filter(l=>/H264/i.test(l)).length;"
+                                    "if(h264Count>0){"
+                                        "console.log('[MAI] Remote SDP '+desc.type+': removing '+h264Count+' H264 lines');"
+                                        "desc=Object.assign({},desc,{sdp:maiRemoveH264(desc.sdp)});"
+                                    "}"
+                                    "const codecs=desc.sdp.split('\\n').filter(l=>/^a=rtpmap/.test(l)).map(l=>l.split(' ')[1]);"
+                                    "console.log('[MAI] setRemoteDescription('+desc.type+') codecs:', codecs.join(', '));"
+                                "}"
+                                "return origSetRemote.apply(this,[desc]);"
+                            "};"
+
+                            "const origAddTrack=RTCPeerConnection.prototype.addTrack;"
+                            "RTCPeerConnection.prototype.addTrack=function(track){"
+                                "console.log('[MAI] addTrack:', track.kind, track.label, track.readyState);"
+                                "return origAddTrack.apply(this,arguments);"
+                            "};"
+
+                            // === KEY FIX: Intercept setCodecPreferences ===
+                            // Teams uses setCodecPreferences to restrict to H.264+AV1.
+                            // After our SDP H.264 removal, only AV1 remains and server
+                            // rejects it. Fix: always inject VP8/VP9 into preferences
+                            // so they survive H.264 removal.
+                            "const origSetCodecPrefs=RTCRtpTransceiver.prototype.setCodecPreferences;"
+                            "if(origSetCodecPrefs){"
+                                "RTCRtpTransceiver.prototype.setCodecPreferences=function(codecs){"
+                                    "if(!codecs||codecs.length===0)return origSetCodecPrefs.call(this,codecs);"
+                                    "const hasVideo=codecs.some(c=>c.mimeType&&c.mimeType.startsWith('video/'));"
+                                    "if(hasVideo){"
+                                        "const hasVP8=codecs.some(c=>c.mimeType==='video/VP8');"
+                                        "const hasVP9=codecs.some(c=>c.mimeType==='video/VP9');"
+                                        "if(!hasVP8||!hasVP9){"
+                                            "const realCaps=origSenderCaps?origSenderCaps.call(RTCRtpSender,'video'):null;"
+                                            "if(realCaps&&realCaps.codecs){"
+                                                "const vp8=realCaps.codecs.filter(c=>c.mimeType==='video/VP8');"
+                                                "const vp9=realCaps.codecs.filter(c=>c.mimeType==='video/VP9');"
+                                                "const rtx=realCaps.codecs.filter(c=>c.mimeType==='video/rtx');"
+                                                "if(!hasVP8&&vp8.length)codecs=[...codecs,...vp8,...rtx.slice(0,1)];"
+                                                "if(!hasVP9&&vp9.length)codecs=[...codecs,...vp9,...rtx.slice(0,1)];"
+                                                "console.log('[MAI] setCodecPreferences: injected VP8/VP9, total codecs:', codecs.length,"
+                                                    "codecs.map(c=>c.mimeType).join(', '));"
+                                            "}"
+                                        "}else{"
+                                            "console.log('[MAI] setCodecPreferences: VP8/VP9 already present');"
+                                        "}"
+                                    "}"
+                                    "return origSetCodecPrefs.call(this,codecs);"
+                                "};"
+                            "}"
+
+                            // Log replaceTrack for screen sharing diagnostics
+                            "const origReplaceTrack=RTCRtpSender.prototype.replaceTrack;"
+                            "RTCRtpSender.prototype.replaceTrack=function(track){"
+                                "console.log('[MAI] replaceTrack:', track?(track.kind+':'+track.label+':'+track.readyState):'null');"
+                                "return origReplaceTrack.apply(this,arguments);"
+                            "};"
+
+                            "const origAddTransceiver=RTCPeerConnection.prototype.addTransceiver;"
+                            "RTCPeerConnection.prototype.addTransceiver=function(trackOrKind,init){"
+                                "const label=typeof trackOrKind==='string'?trackOrKind:trackOrKind.label||trackOrKind.kind;"
+                                "console.log('[MAI] addTransceiver:', label, init?JSON.stringify(init):'');"
+                                "return origAddTransceiver.apply(this,arguments);"
+                            "};"
+
+                            "const origCreateOffer=RTCPeerConnection.prototype.createOffer;"
+                            "RTCPeerConnection.prototype.createOffer=function(opts){"
+                                "console.log('[MAI] createOffer called, senders:', this.getSenders().map(s=>s.track?(s.track.kind+':'+s.track.label):null).filter(Boolean).join(', '));"
+                                "return origCreateOffer.apply(this,arguments);"
+                            "};"
+
+                            "const origClose=RTCPeerConnection.prototype.close;"
+                            "RTCPeerConnection.prototype.close=function(){"
+                                "console.log('[MAI] RTCPeerConnection.close()');"
+                                "return origClose.apply(this,arguments);"
+                            "};"
+                        "}"];
+
+                    // Diagnostic-only getDisplayMedia logging via Proxy (invisible to toString)
+                    [js appendString:
+                        @"if(navigator.mediaDevices&&navigator.mediaDevices.getDisplayMedia){"
+                            "const _realGDM=navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);"
+                            "navigator.mediaDevices.getDisplayMedia=new Proxy(_realGDM,{"
+                                "apply:function(target,thisArg,args){"
+                                    "console.log('[MAI] getDisplayMedia called, constraints:', JSON.stringify(args[0]));"
+                                    "return target.apply(thisArg,args).then(function(s){"
+                                        "console.log('[MAI] getDisplayMedia SUCCESS, tracks:', s.getTracks().map(t=>t.kind+':'+t.label+':'+t.readyState).join(', '));"
+                                        "var vt=s.getVideoTracks();"
+                                        "if(vt.length)console.log('[MAI] Track settings:', JSON.stringify(vt[0].getSettings()));"
+                                        "return s;"
+                                    "},function(e){"
+                                        "console.log('[MAI] getDisplayMedia FAILED:', e.name, e.message);"
+                                        "throw e;"
+                                    "});"
+                                "}"
+                            "});"
+                        "}"];
+
+                    [js appendString:@"})();"];
 
                     cef_string_t script = cef_string_from_nsstring(js);
                     cef_string_t scriptUrl = cef_string_from_nsstring(@"about:blank");
@@ -479,11 +673,27 @@ static void CEF_CALLBACK on_media_access_change(cef_display_handler_t* self,
           has_video_access, has_audio_access);
 }
 
+/// Capture console.log messages from JS — critical for [MAI] diagnostics
+static int CEF_CALLBACK on_console_message(cef_display_handler_t* self,
+                                            cef_browser_t* browser,
+                                            cef_log_severity_t level,
+                                            const cef_string_t* message,
+                                            const cef_string_t* source,
+                                            int line) {
+    if (!message) return 0;
+    NSString* msg = nsstring_from_cef_string(message);
+    if (!msg) return 0;
+    // Log ALL console messages for verbose debugging
+    cef_log_to_file("JS %s", [msg UTF8String]);
+    return 0; // Allow default handling
+}
+
 static void init_display_handler() {
     init_simple_ref(&g_displayHandler.base, sizeof(cef_display_handler_t));
     g_displayHandler.on_address_change = on_address_change;
     g_displayHandler.on_title_change = on_title_change;
     g_displayHandler.on_media_access_change = on_media_access_change;
+    g_displayHandler.on_console_message = on_console_message;
 }
 
 // MARK: - Permission Handler (Media Capture)
@@ -588,14 +798,13 @@ static void stopWindowCapture(void) {
     g_isCapturing = NO;
 }
 
-static void startWindowCapture(SCWindow* window) {
+static void startCaptureWithFilter(SCContentFilter* filter, NSString* label) {
     stopWindowCapture();
 
-    SCContentFilter* filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
     SCStreamConfiguration* config = [[SCStreamConfiguration alloc] init];
-    config.width = 1280;
-    config.height = 720;
-    config.minimumFrameInterval = CMTimeMake(1, 5); // 5 fps
+    config.width = 1920;
+    config.height = 1080;
+    config.minimumFrameInterval = CMTimeMake(1, 15); // 15 fps (matches Teams constraints)
     config.pixelFormat = kCVPixelFormatType_32BGRA;
     config.showsCursor = YES;
 
@@ -611,7 +820,7 @@ static void startWindowCapture(SCWindow* window) {
                    sampleHandlerQueue:dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0)
                                error:&error];
     if (error) {
-        cef_log_to_file("Window capture: Failed to add output: %s", [[error description] UTF8String]);
+        cef_log_to_file("Capture: Failed to add output: %s", [[error description] UTF8String]);
         g_captureStream = nil;
         return;
     }
@@ -619,13 +828,24 @@ static void startWindowCapture(SCWindow* window) {
     g_isCapturing = YES;
     [g_captureStream startCaptureWithCompletionHandler:^(NSError* startError) {
         if (startError) {
-            cef_log_to_file("Window capture: Failed to start: %s", [[startError description] UTF8String]);
+            cef_log_to_file("Capture: Failed to start: %s", [[startError description] UTF8String]);
             g_isCapturing = NO;
         } else {
-            cef_log_to_file("Window capture: Started successfully for '%s'",
-                            [window.title UTF8String]);
+            cef_log_to_file("Capture: Started successfully for '%s'", [label UTF8String]);
         }
     }];
+}
+
+static void startWindowCapture(SCWindow* window) {
+    SCContentFilter* filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
+    startCaptureWithFilter(filter, window.title ?: @"Unknown window");
+}
+
+static void startDisplayCapture(SCDisplay* display) {
+    // Capture entire display excluding nothing
+    SCContentFilter* filter = [[SCContentFilter alloc]
+        initWithDisplay:display excludingWindows:@[]];
+    startCaptureWithFilter(filter, [NSString stringWithFormat:@"Display %u", display.displayID]);
 }
 
 @implementation MAICaptureOutput
@@ -692,8 +912,9 @@ static void startWindowCapture(SCWindow* window) {
 
 static cef_jsdialog_handler_t g_jsdialogHandler;
 
-// Store enumerated windows for lookup after user selection
+// Store enumerated sources for lookup after user selection
 static NSArray<SCWindow*>* g_enumeratedWindows = nil;
+static NSArray<SCDisplay*>* g_enumeratedDisplays = nil;
 
 static int CEF_CALLBACK on_jsdialog(
     cef_jsdialog_handler_t* self,
@@ -741,14 +962,15 @@ static int CEF_CALLBACK on_jsdialog(
 
             // Add screens
             NSArray<SCDisplay*>* displays = content.displays;
+            g_enumeratedDisplays = [displays copy];
             if (displays.count == 1) {
                 [displayNames addObject:@"\xF0\x9F\x96\xA5 Entire screen"];
-                [sourceTypes addObject:@"S"];
+                [sourceTypes addObject:@"S:0"];
             } else {
                 for (NSUInteger i = 0; i < displays.count; i++) {
                     [displayNames addObject:[NSString stringWithFormat:
                         @"\xF0\x9F\x96\xA5 Screen %lu", (unsigned long)(i + 1)]];
-                    [sourceTypes addObject:@"S"];
+                    [sourceTypes addObject:[NSString stringWithFormat:@"S:%lu", (unsigned long)i]];
                 }
             }
 
@@ -801,20 +1023,32 @@ static int CEF_CALLBACK on_jsdialog(
                 NSInteger idx = popup.indexOfSelectedItem;
                 NSString* type = sourceTypes[idx];
 
-                if ([type isEqualToString:@"S"]) {
-                    // Screen selected → JS will call real getDisplayMedia (auto-select handles it)
-                    cef_log_to_file("Screen picker: User selected screen");
-                    cef_string_t result = cef_string_from_nsstring(@"SCREEN");
+                if ([type hasPrefix:@"S:"]) {
+                    // Screen selected → return Chromium source ID for getUserMedia
+                    // Format: "screen:DISPLAY_ID:0" (same as Electron desktopCapturer)
+                    NSInteger dispIdx = [[type substringFromIndex:2] integerValue];
+                    SCDisplay* selectedDisplay = g_enumeratedDisplays[dispIdx];
+                    NSString* sourceId = [NSString stringWithFormat:@"screen:%u:0",
+                                          selectedDisplay.displayID];
+                    cef_log_to_file("Screen picker: User selected display %u → %s",
+                                    selectedDisplay.displayID, [sourceId UTF8String]);
+                    // Also start SCStream capture as fallback if getUserMedia fails
+                    startDisplayCapture(selectedDisplay);
+                    cef_string_t result = cef_string_from_nsstring(sourceId);
                     callback->cont(callback, 1, &result);
                     cef_string_clear(&result);
                 } else if ([type hasPrefix:@"W:"]) {
-                    // Window selected → start native capture
+                    // Window selected → return Chromium source ID for getUserMedia
+                    // Format: "window:WINDOW_ID:0"
                     NSInteger winIdx = [[type substringFromIndex:2] integerValue];
                     SCWindow* selectedWindow = g_enumeratedWindows[winIdx];
-                    cef_log_to_file("Screen picker: User selected window '%s'",
-                                    [selectedWindow.title UTF8String]);
+                    NSString* sourceId = [NSString stringWithFormat:@"window:%u:0",
+                                          selectedWindow.windowID];
+                    cef_log_to_file("Screen picker: User selected window '%s' → %s",
+                                    [selectedWindow.title UTF8String], [sourceId UTF8String]);
+                    // Also start SCStream capture as fallback if getUserMedia fails
                     startWindowCapture(selectedWindow);
-                    cef_string_t result = cef_string_from_nsstring(@"WINDOW");
+                    cef_string_t result = cef_string_from_nsstring(sourceId);
                     callback->cont(callback, 1, &result);
                     cef_string_clear(&result);
                 }
@@ -825,6 +1059,7 @@ static int CEF_CALLBACK on_jsdialog(
             }
 
             g_enumeratedWindows = nil;
+            g_enumeratedDisplays = nil;
             cef_release(&callback->base);
         });
     }];
@@ -875,6 +1110,12 @@ static void init_client() {
     g_client.get_jsdialog_handler = get_jsdialog_handler;
 }
 
+// MARK: - Standalone Native Window for Teams
+// CEF Views framework is INCOMPATIBLE with external_message_pump=1 on macOS
+// because Views requires MessagePumpNSApplication (only created by CefRunMessageLoop).
+// Instead, we create a native NSWindow and embed an Alloy-style CEF browser in it.
+// getDisplayMedia uses our custom native picker (ScreenCaptureKit + JSDialog handler).
+
 // MARK: - Browser Process Handler
 // Required when using external_message_pump = 1.
 // CEF calls on_schedule_message_pump_work to tell us when to process messages.
@@ -912,7 +1153,7 @@ static void CEF_CALLBACK on_schedule_message_pump_work(
     if (delay_ms <= 0) {
         // Work needed ASAP - dispatch immediately to main thread
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (g_cefInitialized) {
+            if (g_cefInitialized && g_browser) {
                 cef_do_message_loop_work();
             }
         });
@@ -922,7 +1163,7 @@ static void CEF_CALLBACK on_schedule_message_pump_work(
             dispatch_time(DISPATCH_TIME_NOW, delay_ms * NSEC_PER_MSEC),
             dispatch_get_main_queue(),
             ^{
-                if (g_cefInitialized) {
+                if (g_cefInitialized && g_browser) {
                     cef_do_message_loop_work();
                 }
             });
@@ -948,27 +1189,31 @@ static void CEF_CALLBACK on_before_command_line_processing(
 
     if (!command_line) return;
 
-    // Auto-select "Entire screen" for screen sharing via getDisplayMedia().
-    // In embedded CEF mode, Chrome can't show its own picker UI.
-    // Our custom JS picker handles source selection; this flag ensures
-    // screen capture works when the user selects a screen option.
-    cef_string_t autoSelName = cef_string_from_nsstring(@"auto-select-desktop-capture-source");
-    cef_string_t autoSelVal = cef_string_from_nsstring(@"Entire screen");
-    command_line->append_switch_with_value(command_line, &autoSelName, &autoSelVal);
-    cef_string_clear(&autoSelName);
-    cef_string_clear(&autoSelVal);
+    // Log process type for debugging
+    NSString* procType = process_type ? nsstring_from_cef_string(process_type) : @"browser";
+    NSLog(@"[CEF] on_before_command_line_processing for: %@", procType);
 
-    // Enable ScreenCaptureKit (macOS 14+) for native system picker.
-    // The macOS system picker (SCContentSharingPicker) shows Screens, Windows, and Apps
-    // without requiring Chrome's Views-based DesktopMediaPickerViews dialog,
-    // which doesn't work properly in embedded non-Views CEF windows.
-    cef_string_t enableFeaturesName = cef_string_from_nsstring(@"enable-features");
-    cef_string_t enableFeaturesVal = cef_string_from_nsstring(
-        @"UseSCContentSharingPicker,ScreenCaptureKitStreamPickerSonoma,"
-        @"ScreenCaptureKitPickerScreen,ScreenCaptureKitMacScreen");
-    command_line->append_switch_with_value(command_line, &enableFeaturesName, &enableFeaturesVal);
-    cef_string_clear(&enableFeaturesName);
-    cef_string_clear(&enableFeaturesVal);
+    // Enable media stream APIs
+    cef_string_t mediaStream = cef_string_from_nsstring(@"enable-media-stream");
+    command_line->append_switch(command_line, &mediaStream);
+    cef_string_clear(&mediaStream);
+
+    // Enable getUserMedia screen capturing — allows getUserMedia() with
+    // chromeMediaSource:'desktop' + chromeMediaSourceId to create REAL desktop
+    // capture tracks (is_screencast=true). This is the Electron/teams-for-linux
+    // approach and produces proper video-content-type RTP headers (0x01).
+    cef_string_t screenCapFlag = cef_string_from_nsstring(@"enable-usermedia-screen-capturing");
+    command_line->append_switch(command_line, &screenCapFlag);
+    cef_string_clear(&screenCapFlag);
+
+    // Auto-accept camera/mic WITHOUT affecting screen capture.
+    // NOTE: --use-fake-ui-for-media-stream was removed because it causes
+    // NotReadableError for getDisplayMedia() in Alloy mode (CEF Forum #20150).
+    // Our on_request_media_access_permission + on_show_permission_prompt callbacks
+    // handle all permission grants.
+    cef_string_t autoAccept = cef_string_from_nsstring(@"auto-accept-camera-and-microphone-capture");
+    command_line->append_switch(command_line, &autoAccept);
+    cef_string_clear(&autoAccept);
 
     // Disable GPU sandbox for macOS compatibility
     cef_string_t flag4 = cef_string_from_nsstring(@"disable-gpu-sandbox");
@@ -994,6 +1239,9 @@ static void CEF_CALLBACK on_before_command_line_processing(
     cef_string_t flag7 = cef_string_from_nsstring(@"disable-extensions");
     command_line->append_switch(command_line, &flag7);
     cef_string_clear(&flag7);
+
+    // NOTE: --auto-select-desktop-capture-source removed — it is Chrome-layer
+    // only and has NO effect in Alloy mode (CEF Issue #3667).
 
     // Log the full command line for debugging
     cef_string_userfree_t fullCmd = command_line->get_command_line_string(command_line);
@@ -1029,7 +1277,7 @@ static void startMessagePump() {
     g_messagePumpTimer = [NSTimer scheduledTimerWithTimeInterval:1.0/30.0
                                                          repeats:YES
                                                            block:^(NSTimer* timer) {
-        if (g_cefInitialized) {
+        if (g_cefInitialized && g_browser) {
             cef_do_message_loop_work();
         }
     }];
@@ -1139,8 +1387,10 @@ static void stopMessagePump() {
     cef_string_set(bsPath.str, bsPath.length, &settings.browser_subprocess_path, 1);
     cef_string_clear(&bsPath);
 
-    // Cache path
-    NSString* cachePath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"MAI_CEF_Cache"];
+    // Cache path — persistent location so cookies/sessions survive app restarts
+    NSArray* appSupport = NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES);
+    NSString* cachePath = [[appSupport firstObject] stringByAppendingPathComponent:@"MAI/CEF"];
     [[NSFileManager defaultManager] createDirectoryAtPath:cachePath
                               withIntermediateDirectories:YES
                                                attributes:nil
@@ -1199,6 +1449,12 @@ static void stopMessagePump() {
     // Close browser first
     [self closeBrowser];
 
+    // Pump remaining messages to let browser close complete
+    for (int i = 0; i < 100 && g_browser != NULL; i++) {
+        cef_do_message_loop_work();
+        usleep(10000);
+    }
+
     // Stop message pump
     stopMessagePump();
 
@@ -1238,10 +1494,8 @@ static void stopMessagePump() {
     windowInfo.bounds.y = (int)frame.origin.y;
     windowInfo.bounds.width = (int)frame.size.width;
     windowInfo.bounds.height = (int)frame.size.height;
-    // Use Chrome runtime style - required for getDisplayMedia() screen sharing.
-    // Alloy style lacks the DesktopMediaPicker, so getDisplayMedia() fails silently.
-    // Chrome style provides the built-in desktop media picker UI.
-    // With parent_view set, Chrome renders content-only (no address bar/tabs).
+    // NOTE: parent_view on macOS FORCES Alloy style regardless of runtime_style.
+    // getDisplayMedia screen sharing uses our ScreenCaptureKit → Canvas pipeline.
     windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
     // Browser settings
@@ -1271,6 +1525,8 @@ static void stopMessagePump() {
 
     if (g_browser) {
         g_browserView = hostView;
+        // Restart message pump if it was stopped (e.g., after previous browser close)
+        startMessagePump();
         NSLog(@"[CEF] Browser created successfully");
     } else {
         NSLog(@"[CEF] ERROR: Failed to create browser");
@@ -1278,6 +1534,86 @@ static void stopMessagePump() {
     }
 
     return hostView;
+}
+
++ (void)openStandaloneBrowserWithURL:(NSString *)url {
+    if (!g_cefInitialized) {
+        if (![self initializeCEF]) {
+            NSLog(@"[CEF] ERROR: Cannot open standalone browser - CEF init failed");
+            return;
+        }
+    }
+
+    // Close existing browser if any
+    if (g_browser) {
+        [self closeBrowser];
+    }
+
+    NSLog(@"[CEF] Creating standalone NSWindow browser for: %@", url);
+    g_isStandaloneMode = YES;
+
+    // Create native NSWindow
+    NSWindow* window = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(100, 100, 1280, 800)
+                  styleMask:(NSWindowStyleMaskTitled |
+                             NSWindowStyleMaskClosable |
+                             NSWindowStyleMaskResizable |
+                             NSWindowStyleMaskMiniaturizable)
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    [window setTitle:@"MAI - Teams"];
+    [window setReleasedWhenClosed:NO];
+
+    NSView* contentView = window.contentView;
+    contentView.wantsLayer = YES;
+
+    // Window info — embed CEF in the native NSWindow's content view.
+    // parent_view forces Alloy style on macOS (per cef_types_mac.h).
+    // getDisplayMedia is handled by our native picker (JSDialog + ScreenCaptureKit).
+    cef_window_info_t windowInfo = {};
+    windowInfo.size = sizeof(cef_window_info_t);
+    windowInfo.parent_view = (__bridge void*)contentView;
+    windowInfo.bounds.x = 0;
+    windowInfo.bounds.y = 0;
+    windowInfo.bounds.width = (int)contentView.bounds.size.width;
+    windowInfo.bounds.height = (int)contentView.bounds.size.height;
+    windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+    // Browser settings
+    cef_browser_settings_t browserSettings = {};
+    browserSettings.size = sizeof(cef_browser_settings_t);
+    browserSettings.webgl = STATE_ENABLED;
+
+    // URL
+    cef_string_t cefURL = cef_string_from_nsstring(url);
+
+    // Add ref to client before passing
+    simple_add_ref(&g_client.base);
+
+    // Create browser synchronously — embedded in native NSWindow
+    g_browser = cef_browser_host_create_browser_sync(
+        &windowInfo,
+        &g_client,
+        &cefURL,
+        &browserSettings,
+        NULL,  // extra_info
+        NULL   // request_context (use default)
+    );
+
+    cef_string_clear(&cefURL);
+
+    if (g_browser) {
+        g_standaloneNSWindow = window;
+        g_browserView = contentView;
+        startMessagePump();
+        [window makeKeyAndOrderFront:nil];
+        [window center];
+        NSLog(@"[CEF] Standalone NSWindow browser created successfully");
+    } else {
+        NSLog(@"[CEF] ERROR: Failed to create standalone browser");
+        g_isStandaloneMode = NO;
+        window = nil;
+    }
 }
 
 + (void)loadURL:(NSString *)url {
@@ -1295,7 +1631,10 @@ static void stopMessagePump() {
 + (void)closeBrowser {
     if (!g_browser) return;
 
-    NSLog(@"[CEF] Closing browser");
+    NSLog(@"[CEF] Closing browser (standalone=%d)", g_isStandaloneMode);
+
+    // Stop any active window capture before closing
+    stopWindowCapture();
 
     cef_browser_host_t* host = g_browser->get_host(g_browser);
     if (host) {
@@ -1303,7 +1642,107 @@ static void stopMessagePump() {
         cef_release(&host->base);
     }
 
-    // Browser will be set to NULL in on_before_close callback
+    // Browser will be set to NULL in on_before_close callback.
+    // Standalone NSWindow is closed in on_before_close too.
+}
+
++ (void)safeCloseBrowser {
+    if (!g_browser) return;
+
+    NSLog(@"[CEF] Safe-closing browser (synchronous)");
+
+    stopWindowCapture();
+
+    // Stop the 30Hz timer FIRST to prevent async cef_do_message_loop_work calls.
+    // We'll manually pump messages in a controlled loop below.
+    stopMessagePump();
+
+    // Initiate the close
+    cef_browser_host_t* host = g_browser->get_host(g_browser);
+    if (host) {
+        host->close_browser(host, 1); // force_close = true
+        cef_release(&host->base);
+    }
+
+    // Manually pump CEF messages until on_before_close sets g_browser = NULL.
+    // This lets CEF process the close sequence (IPC with renderer, cleanup)
+    // without the 30Hz timer interfering.
+    NSLog(@"[CEF] Pumping messages for close sequence...");
+    for (int i = 0; i < 300 && g_browser != NULL; i++) {
+        cef_do_message_loop_work();
+        // Brief sleep to allow IPC processing
+        usleep(10000); // 10ms
+    }
+
+    if (g_browser == NULL) {
+        NSLog(@"[CEF] Browser closed cleanly via on_before_close");
+    } else {
+        // Timeout — force release as fallback
+        NSLog(@"[CEF] Close timed out after 3s, force-releasing");
+        cef_browser_t* b = g_browser;
+        g_browser = NULL;
+        g_browserView = nil;
+        cef_release(&b->base);
+    }
+}
+
++ (void)forceReleaseBrowser {
+    if (!g_browser) return;
+
+    NSLog(@"[CEF] Force-releasing browser (standalone=%d)", g_isStandaloneMode);
+
+    // Stop capture and message pump FIRST to prevent any further CEF callbacks
+    stopWindowCapture();
+    stopMessagePump();
+
+    // CRITICAL: Set g_browser to NULL BEFORE any view manipulation.
+    cef_browser_t* browserToRelease = g_browser;
+    g_browser = NULL;
+
+    NSView* viewToClean = g_browserView;
+    g_browserView = nil;
+    if (viewToClean) {
+        for (NSView* subview in [viewToClean.subviews copy]) {
+            [subview removeFromSuperview];
+        }
+    }
+
+    // Close standalone NSWindow if present
+    if (g_isStandaloneMode && g_standaloneNSWindow) {
+        [g_standaloneNSWindow close];
+        g_standaloneNSWindow = nil;
+        g_isStandaloneMode = NO;
+    }
+
+    // Release browser reference LAST
+    if (browserToRelease) {
+        cef_release(&browserToRelease->base);
+    }
+
+    NSLog(@"[CEF] Browser force-released");
+
+    // Notify delegate
+    dispatch_async(dispatch_get_main_queue(), ^{
+        id<CEFBridgeDelegate> delegate = g_delegate;
+        if ([delegate respondsToSelector:@selector(cefBrowserDidClose)]) {
+            [delegate cefBrowserDidClose];
+        }
+    });
+}
+
++ (void)killHelperProcesses {
+    // Find and kill MAI Helper processes spawned by CEF.
+    // These are GPU, Renderer, Network, and Storage subprocesses.
+    NSTask* task = [[NSTask alloc] init];
+    task.launchPath = @"/usr/bin/pkill";
+    task.arguments = @[@"-f", @"MAI Helper"];
+    @try {
+        [task launch];
+        [task waitUntilExit];
+        NSLog(@"[CEF] Helper processes terminated (pkill exit code: %d)", task.terminationStatus);
+    } @catch (NSException* e) {
+        NSLog(@"[CEF] Failed to kill helper processes: %@", e);
+    }
 }
 
 + (void)executeJavaScript:(NSString *)script {

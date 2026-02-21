@@ -21,7 +21,7 @@ struct WebViewContainer: View {
                             .allowsHitTesting(tab.id == browserState.currentTab?.id)
                     } else if tab.useChromiumEngine {
                         // Tab de videoconferencia: usar Chromium (CEF)
-                        CEFWebView(url: tab.url, tab: tab)
+                        CEFWebView(url: tab.url, tab: tab, browserState: browserState)
                             .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
                             .allowsHitTesting(tab.id == browserState.currentTab?.id)
                     } else {
@@ -420,6 +420,17 @@ struct WebViewRepresentable: NSViewRepresentable {
                 decisionHandler(.cancel)
                 DispatchQueue.main.async {
                     webView.load(URLRequest(url: realURL))
+                }
+                return
+            }
+
+            // Interceptar dominios de videoconferencia → cambiar a Chromium
+            if BrowserState.shouldUseChromiumEngine(for: url.absoluteString) && !tab.useChromiumEngine {
+                print("🔄 WebKit interceptó videoconferencia: \(url.absoluteString)")
+                decisionHandler(.cancel)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.browserState.navigate(to: url.absoluteString)
                 }
                 return
             }

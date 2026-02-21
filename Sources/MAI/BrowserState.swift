@@ -80,19 +80,23 @@ class BrowserState: ObservableObject {
         currentTabIndex = tabs.count - 1
     }
 
-    func closeTab(at index: Int) {
-        guard tabs.count > 1 else { return }  // Mantener al menos 1 tab
+    func closeTab(at index: Int, force: Bool = false) {
+        guard force || tabs.count > 1 else { return }  // Mantener al menos 1 tab
 
-        // If closing a Chromium tab, release CEF browser
         let closingTab = tabs[index]
         if closingTab.useChromiumEngine {
-            CEFBridge.closeBrowser()
-            print("🔄 CEF browser closed for tab: \(closingTab.title)")
+            // CEF browser will be closed by CEFWebView.dismantleNSView (async)
+            // when SwiftUI removes the view from the hierarchy
+            print("🔄 Closing CEF tab: \(closingTab.title)")
         }
 
         tabs.remove(at: index)
 
-        if currentTabIndex >= tabs.count {
+        // If all tabs closed, create a blank one
+        if tabs.isEmpty {
+            tabs.append(Tab())
+            currentTabIndex = 0
+        } else if currentTabIndex >= tabs.count {
             currentTabIndex = tabs.count - 1
         }
     }
@@ -137,13 +141,44 @@ class BrowserState: ObservableObject {
 
         // Auto-detect video conferencing domains → use Chromium engine
         let shouldUseChromium = Self.shouldUseChromiumEngine(for: finalURL)
-        if shouldUseChromium != tab.useChromiumEngine {
-            tab.useChromiumEngine = shouldUseChromium
-            if shouldUseChromium {
-                print("🔄 Switching to Chromium engine for: \(finalURL)")
-            } else {
-                print("🔄 Switching back to WebKit engine")
+
+        if tab.useChromiumEngine {
+            // Tab already in Chromium — all navigation goes through CEF.
+            // CEF close/release always crashes, so we never switch back to WebKit.
+            print("🔄 Navigating in Chromium: \(finalURL)")
+            CEFBridge.loadURL(finalURL)
+            return
+        }
+
+        if shouldUseChromium {
+            let isTeams = Self.isTeamsDomain(for: finalURL)
+
+            // CEF is a singleton — only one Chromium browser at a time.
+            // If another tab already uses Chromium, reuse it.
+            if let existingCEFTab = tabs.first(where: { $0.useChromiumEngine }),
+               let cefIndex = tabs.firstIndex(where: { $0.id == existingCEFTab.id }) {
+                // If switching between Teams and non-Teams, close old browser first
+                if existingCEFTab.useStandaloneChromium != isTeams {
+                    CEFBridge.closeBrowser()
+                    existingCEFTab.useStandaloneChromium = isTeams
+                }
+                print("🔄 Reusing existing Chromium tab for: \(finalURL) (standalone=\(isTeams))")
+                if isTeams {
+                    CEFBridge.openStandaloneBrowser(withURL: finalURL)
+                } else {
+                    CEFBridge.loadURL(finalURL)
+                }
+                existingCEFTab.url = finalURL
+                existingCEFTab.title = "Loading..."
+                currentTabIndex = cefIndex
+                return
             }
+            // No existing CEF tab — switch this tab to Chromium
+            tab.useChromiumEngine = true
+            tab.useStandaloneChromium = isTeams
+            print("🔄 Switching to Chromium engine for: \(finalURL) (standalone=\(isTeams))")
+            tab.navigate(to: finalURL)
+            return
         }
 
         tab.navigate(to: finalURL)
@@ -446,11 +481,24 @@ class BrowserState: ObservableObject {
         "teams.live.com"
     ]
 
+    /// Teams domains that need standalone Chrome-style window for screen sharing
+    private static let teamsDomains: Set<String> = [
+        "teams.microsoft.com",
+        "teams.live.com"
+    ]
+
     /// Determina si una URL debería usar Chromium engine
     static func shouldUseChromiumEngine(for urlString: String) -> Bool {
         guard let url = URL(string: urlString),
               let host = url.host?.lowercased() else { return false }
         return videoConferenceDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// Determina si una URL es Teams (necesita Chrome-style standalone)
+    static func isTeamsDomain(for urlString: String) -> Bool {
+        guard let url = URL(string: urlString),
+              let host = url.host?.lowercased() else { return false }
+        return teamsDomains.contains { host == $0 || host.hasSuffix("." + $0) }
     }
 
     /// Verifica si la URL actual es un sitio de videoconferencia
@@ -537,6 +585,9 @@ class Tab: ObservableObject, Identifiable {
     @Published var canGoForward: Bool = false
     @Published var zoomLevel: Double = 1.0
 
+    // Pending close: tab will be removed after CEF browser fully closes
+    var pendingClose: Bool = false
+
     // Tab Suspension
     @Published var isSuspended: Bool = false
     @Published var suspendedSnapshot: NSImage?
@@ -545,6 +596,8 @@ class Tab: ObservableObject, Identifiable {
 
     // CEF Hybrid Engine - true when tab uses Chromium (video conferencing)
     @Published var useChromiumEngine: Bool = false
+    // True when Teams uses standalone Chrome-style window (for screen sharing)
+    @Published var useStandaloneChromium: Bool = false
 
     weak var webView: WKWebView?
 

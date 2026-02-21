@@ -6,8 +6,11 @@ class WindowManager {
     static let shared = WindowManager()
     private var windows: [(window: NSWindow, state: BrowserState)] = []
 
-    func openNewWindow() {
+    func openNewWindow(url: String? = nil) {
         let browserState = BrowserState()
+        if let url = url {
+            browserState.navigate(to: url)
+        }
         let contentView = BrowserView()
             .environmentObject(browserState)
             .frame(minWidth: 800, minHeight: 600)
@@ -192,19 +195,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("MAI Browser iniciado")
 
-        // Seguir el tema del sistema (claro/oscuro automático)
-        // NSApplication.shared.appearance = NSAppearance(named: .darkAqua)  // Descomentar para forzar oscuro
-
         // Activar la aplicación
         NSApp.activate(ignoringOtherApps: true)
-
-        // Asegurar que la ventana tome foco
-        DispatchQueue.main.async {
-            if let window = NSApp.windows.first {
-                window.makeKeyAndOrderFront(nil)
-                window.orderFrontRegardless()
-            }
-        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -220,8 +212,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        if let window = NSApplication.shared.windows.first {
-            window.makeKeyAndOrderFront(nil)
-        }
+        // SwiftUI ya maneja el foco de ventanas automáticamente
     }
 }
