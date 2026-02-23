@@ -59,6 +59,7 @@ bundle: build-debug helper ## Crea el .app bundle con CEF
 	@cp $(DEBUG_DIR)/$(APP_NAME) $(BUNDLE)/Contents/MacOS/
 	@cp Resources/Info.plist $(BUNDLE)/Contents/
 	@cp Resources/MAI.entitlements $(BUNDLE)/Contents/Resources/ 2>/dev/null || true
+	@cp assets/AppIcon.icns $(BUNDLE)/Contents/Resources/ 2>/dev/null || true
 	@# Copiar CEF framework
 	@echo "📦 Copiando Chromium Embedded Framework..."
 	@cp -R "Frameworks/Chromium Embedded Framework.framework" "$(BUNDLE)/Contents/Frameworks/"
