@@ -25,6 +25,7 @@ class WindowManager {
         window.title = isIncognito ? "MAI Browser — Incógnito" : "MAI Browser"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.animationBehavior = .none
         if isIncognito {
             window.backgroundColor = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1.0)
         }
@@ -45,13 +46,16 @@ class WindowManager {
         windows.append((window: window, state: browserState))
 
         // Limpiar referencia cuando se cierre la ventana
+        // Delay para evitar crash en _NSWindowTransformAnimation dealloc
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
             queue: .main
         ) { [weak self] notification in
             if let closedWindow = notification.object as? NSWindow {
-                self?.windows.removeAll { $0.window === closedWindow }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    self?.windows.removeAll { $0.window === closedWindow }
+                }
             }
         }
 
