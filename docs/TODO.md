@@ -122,6 +122,18 @@
 - [ ] Medir impacto en RAM con nuevo framework
 - [ ] Optimizar calidad de canvas relay (VideoFrame API futuro)
 
+### Modo Incógnito (v0.5.1) ✅
+- [x] Ventana incógnito (Cmd+Shift+N) con BrowserState.isIncognito a nivel de ventana
+- [x] WKWebsiteDataStore.nonPersistent() — cookies/cache se borran al cerrar ventana
+- [x] No guarda historial de navegación en modo incógnito
+- [x] Tema oscuro completo: TabBar, AddressBar, StatusBar, BrowserView
+- [x] colorScheme(.dark) para textos e iconos blancos automáticos
+- [x] Landing page informativa: qué protege MAI, qué no, y diferencial vs Chrome
+- [x] Card "Protección activa de MAI": trackers, ads, cookies terceros, anti-fingerprinting
+- [x] Icono eye.slash.fill en tabs incógnito
+- [x] Menú contextual "Nueva Ventana Incógnito"
+- [x] WindowManager con soporte isIncognito (título y fondo de ventana)
+
 ## Fase 1.5: Preparación para Lanzamiento (Q2 2026)
 
 ### Modelo de Negocio (Freemium)
