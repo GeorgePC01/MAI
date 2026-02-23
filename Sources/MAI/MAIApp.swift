@@ -233,4 +233,26 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidBecomeActive(_ notification: Notification) {
         // SwiftUI ya maneja el foco de ventanas automáticamente
     }
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        let menu = NSMenu()
+
+        let newWindowItem = NSMenuItem(title: "Nueva Ventana", action: #selector(dockNewWindow), keyEquivalent: "")
+        newWindowItem.target = self
+        menu.addItem(newWindowItem)
+
+        let incognitoItem = NSMenuItem(title: "Nueva Ventana Incógnito", action: #selector(dockNewIncognitoWindow), keyEquivalent: "")
+        incognitoItem.target = self
+        menu.addItem(incognitoItem)
+
+        return menu
+    }
+
+    @objc private func dockNewWindow() {
+        WindowManager.shared.openNewWindow()
+    }
+
+    @objc private func dockNewIncognitoWindow() {
+        WindowManager.shared.openNewWindow(isIncognito: true)
+    }
 }

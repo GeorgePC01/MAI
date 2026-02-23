@@ -26,23 +26,20 @@ struct TabBar: View {
                             hoveredTab = isHovered ? tab.id : nil
                         }
                     }
+
+                    // Botón nueva pestaña (junto a las pestañas)
+                    Button(action: { browserState.createTab() }) {
+                        Image(systemName: "plus")
+                            .font(.system(size: 14, weight: .medium))
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .help("Nueva pestaña (Cmd+T)")
                 }
                 .padding(.horizontal, 4)
             }
             .frame(height: 38)
-
-            // Botón nueva pestaña
-            Button(action: { browserState.createTab() }) {
-                Image(systemName: "plus")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.secondary)
-                    .frame(width: 28, height: 28)
-                    .background(Color.clear)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("Nueva pestaña (Cmd+T)")
-            .padding(.trailing, 8)
         }
         .background(TabBarBackground())
         .colorScheme(browserState.isIncognito ? .dark : .light)
@@ -60,11 +57,16 @@ struct TabItem: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Icono de suspendida, incógnito, o favicon
+            // Icono de suspendida, pinned, incógnito, o favicon
             if tab.isSuspended {
                 Image(systemName: "moon.zzz.fill")
                     .font(.system(size: 12))
                     .foregroundColor(.orange)
+                    .frame(width: 16, height: 16)
+            } else if tab.isPinned {
+                Image(systemName: "pin.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(.blue)
                     .frame(width: 16, height: 16)
             } else if tab.isIncognito {
                 Image(systemName: "eye.slash.fill")
@@ -91,6 +93,12 @@ struct TabItem: View {
                 .truncationMode(.tail)
                 .frame(maxWidth: 150, alignment: .leading)
                 .opacity(tab.isSuspended ? 0.6 : 1.0)
+
+            if tab.isMuted {
+                Image(systemName: "speaker.slash.fill")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
 
             Spacer(minLength: 0)
 
@@ -123,9 +131,29 @@ struct TabItem: View {
             onSelect()
         }
         .contextMenu {
+            Button(action: { browserState.reloadTab(tab) }) {
+                Label("Recargar", systemImage: "arrow.clockwise")
+            }
+            .disabled(tab.isSuspended)
+
+            Button(action: { browserState.duplicateTab(tab) }) {
+                Label("Duplicar", systemImage: "plus.square.on.square")
+            }
+
+            Button(action: { browserState.toggleMuteTab(tab) }) {
+                Label(tab.isMuted ? "Activar Sonido" : "Silenciar Sitio", systemImage: tab.isMuted ? "speaker.wave.2" : "speaker.slash")
+            }
+            .disabled(tab.isSuspended)
+
+            Button(action: { browserState.togglePinTab(tab) }) {
+                Label(tab.isPinned ? "Desfijar Tab" : "Fijar Tab", systemImage: tab.isPinned ? "pin.slash" : "pin")
+            }
+
+            Divider()
+
             if tab.isSuspended {
                 Button(action: { browserState.resumeTab(tab) }) {
-                    Label("Restaurar Tab", systemImage: "arrow.clockwise")
+                    Label("Restaurar Tab", systemImage: "arrow.uturn.backward")
                 }
             } else {
                 Button(action: { browserState.suspendTab(tab) }) {
@@ -133,21 +161,21 @@ struct TabItem: View {
                 }
             }
 
-            Divider()
-
             Button(action: { browserState.suspendInactiveTabs() }) {
                 Label("Suspender Otras Tabs", systemImage: "moon.zzz.fill")
             }
 
             Divider()
 
-            Button(action: {
-                WindowManager.shared.openNewWindow(isIncognito: true)
-            }) {
-                Label("Nueva Ventana Incógnito", systemImage: "eye.slash")
+            Button(action: { browserState.closeOtherTabs(except: tab) }) {
+                Label("Cerrar Otras Tabs", systemImage: "xmark.square")
             }
+            .disabled(browserState.tabs.count <= 1)
 
-            Divider()
+            Button(action: { browserState.closeTabsToRight(of: tab) }) {
+                Label("Cerrar Tabs a la Derecha", systemImage: "xmark.square.fill")
+            }
+            .disabled(browserState.tabs.last?.id == tab.id)
 
             Button(action: onClose) {
                 Label("Cerrar Tab", systemImage: "xmark")

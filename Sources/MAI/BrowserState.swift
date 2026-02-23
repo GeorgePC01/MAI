@@ -120,6 +120,54 @@ class BrowserState: ObservableObject {
         tabs.move(fromOffsets: source, toOffset: destination)
     }
 
+    func duplicateTab(_ tab: Tab) {
+        let newTab = Tab(url: tab.url, isIncognito: tab.isIncognito)
+        newTab.title = tab.title
+        newTab.favicon = tab.favicon
+        if let index = tabs.firstIndex(where: { $0.id == tab.id }) {
+            tabs.insert(newTab, at: index + 1)
+            currentTabIndex = index + 1
+        } else {
+            tabs.append(newTab)
+            currentTabIndex = tabs.count - 1
+        }
+    }
+
+    func togglePinTab(_ tab: Tab) {
+        tab.isPinned.toggle()
+        // Mover pinned tabs al inicio
+        let pinned = tabs.filter { $0.isPinned }
+        let unpinned = tabs.filter { !$0.isPinned }
+        tabs = pinned + unpinned
+        if let newIndex = tabs.firstIndex(where: { $0.id == tab.id }) {
+            currentTabIndex = newIndex
+        }
+    }
+
+    func toggleMuteTab(_ tab: Tab) {
+        tab.isMuted.toggle()
+        tab.webView?.evaluateJavaScript("""
+            document.querySelectorAll('video, audio').forEach(el => el.muted = \(tab.isMuted));
+        """)
+    }
+
+    func closeOtherTabs(except tab: Tab) {
+        tabs.removeAll { $0.id != tab.id }
+        currentTabIndex = 0
+    }
+
+    func closeTabsToRight(of tab: Tab) {
+        guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        tabs.removeSubrange((index + 1)...)
+        if currentTabIndex >= tabs.count {
+            currentTabIndex = tabs.count - 1
+        }
+    }
+
+    func reloadTab(_ tab: Tab) {
+        tab.webView?.reload()
+    }
+
     // MARK: - Navigation
 
     func navigate(to urlString: String) {
@@ -601,6 +649,10 @@ class Tab: ObservableObject, Identifiable {
 
     // Incognito mode - no history, non-persistent cookies/cache
     let isIncognito: Bool
+
+    // Tab pinning and muting
+    @Published var isPinned: Bool = false
+    @Published var isMuted: Bool = false
 
     weak var webView: WKWebView?
 
