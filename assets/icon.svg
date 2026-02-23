@@ -1,0 +1,178 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Gradientes de fuego -->
+    <linearGradient id="fireRed" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF3D00"/>
+      <stop offset="100%" stop-color="#D50000"/>
+    </linearGradient>
+
+    <linearGradient id="fireOrange" x1="0%" y1="100%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FF9100"/>
+      <stop offset="100%" stop-color="#FF6D00"/>
+    </linearGradient>
+
+    <linearGradient id="fireYellow" x1="100%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#FFD600"/>
+      <stop offset="100%" stop-color="#FFAB00"/>
+    </linearGradient>
+
+    <radialGradient id="centerEmber" cx="50%" cy="45%" r="50%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="25%" stop-color="#FFF176"/>
+      <stop offset="55%" stop-color="#FF9100"/>
+      <stop offset="100%" stop-color="#FF3D00"/>
+    </radialGradient>
+
+    <radialGradient id="bottomHalf" cx="50%" cy="30%" r="70%">
+      <stop offset="0%" stop-color="#37474F"/>
+      <stop offset="100%" stop-color="#1a1a2e"/>
+    </radialGradient>
+
+    <radialGradient id="outerGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="70%" stop-color="#FF6D00" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#FF6D00" stop-opacity="0.15"/>
+    </radialGradient>
+
+    <linearGradient id="flameTip" x1="50%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#FF6D00"/>
+      <stop offset="100%" stop-color="#FF3D00" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="flameInner" x1="50%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#FFD600"/>
+      <stop offset="100%" stop-color="#FF9100" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="bandGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#263238"/>
+      <stop offset="50%" stop-color="#37474F"/>
+      <stop offset="100%" stop-color="#263238"/>
+    </linearGradient>
+
+    <!-- Clips -->
+    <clipPath id="sphere">
+      <circle cx="256" cy="256" r="200"/>
+    </clipPath>
+
+    <clipPath id="topHalf">
+      <rect x="0" y="0" width="512" height="256"/>
+    </clipPath>
+
+    <clipPath id="bottomHalfClip">
+      <rect x="0" y="256" width="512" height="256"/>
+    </clipPath>
+
+    <!-- Clip para el anillo de segmentos (donut) -->
+    <clipPath id="donut">
+      <path d="M256,56 A200,200 0 1,1 255.99,56 Z M256,156 A100,100 0 1,0 256.01,156 Z" fill-rule="evenodd"/>
+    </clipPath>
+
+    <!-- Sombra -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feFlood flood-color="#FF6B00" flood-opacity="0.4"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+  </defs>
+
+  <!-- Glow ambiental -->
+  <circle cx="256" cy="256" r="256" fill="url(#outerGlow)"/>
+
+  <!-- === LLAMAS EXTERIORES (detras de la esfera) === -->
+
+  <!-- Llama grande superior -->
+  <path d="M256,56 Q220,-20 235,-50 Q256,0 277,-50 Q292,-20 256,56 Z"
+        fill="url(#flameTip)" opacity="0.85"/>
+  <path d="M256,56 Q236,-5 243,-30 Q256,5 269,-30 Q276,-5 256,56 Z"
+        fill="url(#flameInner)" opacity="0.9"/>
+
+  <!-- Llama superior-izquierda -->
+  <path d="M120,110 Q80,55 95,30 Q110,65 105,25 Q130,60 120,110 Z"
+        fill="url(#flameTip)" opacity="0.6" transform="rotate(10, 120, 70)"/>
+
+  <!-- Llama superior-derecha -->
+  <path d="M392,110 Q432,55 417,30 Q402,65 407,25 Q382,60 392,110 Z"
+        fill="url(#flameTip)" opacity="0.6" transform="rotate(-10, 392, 70)"/>
+
+  <!-- Llamas laterales -->
+  <path d="M56,230 Q20,200 15,175 Q35,200 25,168 Q50,198 56,230 Z"
+        fill="url(#flameTip)" opacity="0.5" transform="rotate(15, 40, 200)"/>
+  <path d="M456,230 Q492,200 497,175 Q477,200 487,168 Q462,198 456,230 Z"
+        fill="url(#flameTip)" opacity="0.5" transform="rotate(-15, 472, 200)"/>
+
+  <!-- === ESFERA PRINCIPAL === -->
+
+  <!-- Base de la esfera -->
+  <circle cx="256" cy="256" r="200" fill="#1a1a2e" filter="url(#glow)"/>
+
+  <!-- Mitad inferior oscura (Pokeball bottom) -->
+  <g clip-path="url(#sphere)">
+    <rect x="56" y="256" width="400" height="200" fill="url(#bottomHalf)"/>
+
+    <!-- Brillo sutil en la parte inferior -->
+    <ellipse cx="256" cy="420" rx="140" ry="30" fill="white" opacity="0.04"/>
+  </g>
+
+  <!-- Segmentos de fuego estilo Chrome en la mitad superior (dentro del donut) -->
+  <g clip-path="url(#donut)">
+    <!-- Solo la mitad superior tiene segmentos de color -->
+    <g clip-path="url(#topHalf)">
+      <!-- Segmento rojo (izquierda-arriba) -->
+      <path d="M256,256 L96,56 A200,200 0 0,1 256,56 Z" fill="url(#fireRed)"/>
+
+      <!-- Segmento naranja (centro-arriba) -->
+      <path d="M256,256 L256,56 A200,200 0 0,1 416,56 Z" fill="url(#fireOrange)"/>
+
+      <!-- Segmento amarillo (derecha) -->
+      <path d="M256,256 L416,56 A200,200 0 0,1 456,256 Z" fill="url(#fireYellow)"/>
+
+      <!-- Rojo en el extremo izquierdo -->
+      <path d="M256,256 L56,256 A200,200 0 0,1 96,56 Z" fill="url(#fireRed)" opacity="0.8"/>
+
+      <!-- Separadores oscuros entre segmentos -->
+      <line x1="256" y1="256" x2="96" y2="56" stroke="#1a1a2e" stroke-width="5"/>
+      <line x1="256" y1="256" x2="256" y2="56" stroke="#1a1a2e" stroke-width="5"/>
+      <line x1="256" y1="256" x2="416" y2="56" stroke="#1a1a2e" stroke-width="5"/>
+    </g>
+
+    <!-- Mitad inferior del donut: oscura -->
+    <g clip-path="url(#bottomHalfClip)">
+      <rect x="56" y="256" width="400" height="200" fill="url(#bottomHalf)"/>
+    </g>
+  </g>
+
+  <!-- === BANDA HORIZONTAL (Pokeball divider) === -->
+  <g clip-path="url(#sphere)">
+    <rect x="56" y="244" width="400" height="24" fill="url(#bandGrad)"/>
+    <line x1="56" y1="244" x2="456" y2="244" stroke="#455A64" stroke-width="1.5"/>
+    <line x1="56" y1="268" x2="456" y2="268" stroke="#455A64" stroke-width="1.5"/>
+  </g>
+
+  <!-- === BOTON CENTRAL (Pokeball button = ember) === -->
+
+  <!-- Anillo exterior del boton -->
+  <circle cx="256" cy="256" r="72" fill="#263238" stroke="#455A64" stroke-width="3"/>
+
+  <!-- Ember brillante en el centro -->
+  <circle cx="256" cy="256" r="58" fill="url(#centerEmber)"/>
+
+  <!-- Brillo caliente -->
+  <circle cx="256" cy="256" r="25" fill="white" opacity="0.3"/>
+  <circle cx="256" cy="256" r="12" fill="white" opacity="0.5"/>
+
+  <!-- Reflejo de luz en la esfera -->
+  <g clip-path="url(#sphere)">
+    <ellipse cx="200" cy="140" rx="80" ry="45" fill="white" opacity="0.08"/>
+  </g>
+
+  <!-- Borde de la esfera -->
+  <circle cx="256" cy="256" r="200" fill="none" stroke="#455A64" stroke-width="2.5"/>
+</svg>

@@ -1,0 +1,239 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Gradientes del escudo -->
+    <linearGradient id="shieldMain" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" stop-color="#1E1E3A"/>
+      <stop offset="100%" stop-color="#0A0A18"/>
+    </linearGradient>
+
+    <linearGradient id="shieldEdge" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#FF8C00" stop-opacity="0.7"/>
+      <stop offset="50%" stop-color="#FF6D00" stop-opacity="0.4"/>
+      <stop offset="100%" stop-color="#E65100" stop-opacity="0.7"/>
+    </linearGradient>
+
+    <linearGradient id="shieldHighlight" x1="50%" y1="0%" x2="50%" y2="60%">
+      <stop offset="0%" stop-color="white" stop-opacity="0.12"/>
+      <stop offset="100%" stop-color="white" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Gradientes de la llama -->
+    <linearGradient id="flameOuter" x1="50%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#FF6D00"/>
+      <stop offset="60%" stop-color="#FF3D00"/>
+      <stop offset="100%" stop-color="#FF3D00" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="flameMid" x1="50%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#FFA000"/>
+      <stop offset="50%" stop-color="#FF8C00"/>
+      <stop offset="100%" stop-color="#FF6D00" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="flameInner" x1="50%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#FFD600"/>
+      <stop offset="40%" stop-color="#FFAB00"/>
+      <stop offset="100%" stop-color="#FF9100" stop-opacity="0"/>
+    </linearGradient>
+
+    <linearGradient id="flameCore" x1="50%" y1="100%" x2="50%" y2="0%">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="30%" stop-color="#FFF9C4"/>
+      <stop offset="100%" stop-color="#FFD600" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Glow de la llama -->
+    <radialGradient id="emberGlow" cx="50%" cy="55%" r="40%">
+      <stop offset="0%" stop-color="#FF8C00" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#FF8C00" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="ambientGlow" cx="50%" cy="45%" r="55%">
+      <stop offset="50%" stop-color="#FF6D00" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#FF6D00" stop-opacity="0.08"/>
+    </radialGradient>
+
+    <!-- Filtros -->
+    <filter id="flameSoft">
+      <feGaussianBlur stdDeviation="4"/>
+    </filter>
+
+    <filter id="innerShadow">
+      <feGaussianBlur stdDeviation="8" result="blur"/>
+      <feFlood flood-color="#FF6D00" flood-opacity="0.15"/>
+      <feComposite in2="blur" operator="in"/>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="dropShadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.4"/>
+    </filter>
+
+    <!-- Clip del escudo -->
+    <clipPath id="shieldClip">
+      <path d="M256,42
+               C256,42 410,70 430,78
+               C432,79 434,82 434,84
+               L434,240
+               C434,320 380,390 256,468
+               C132,390 78,320 78,240
+               L78,84
+               C78,82 80,79 82,78
+               C102,70 256,42 256,42 Z"/>
+    </clipPath>
+  </defs>
+
+  <!-- Glow ambiental -->
+  <circle cx="256" cy="260" r="256" fill="url(#ambientGlow)"/>
+
+  <!-- === LLAMAS que salen por ARRIBA del escudo === -->
+
+  <!-- Llama exterior - glow suave -->
+  <g filter="url(#flameSoft)" opacity="0.65">
+    <path d="M256,80 C240,40 232,-5 240,-40
+             C248,-60 264,-60 272,-40
+             C280,-5 272,40 256,80 Z"
+          fill="url(#flameOuter)"/>
+  </g>
+
+  <!-- Llama exterior derecha -->
+  <g filter="url(#flameSoft)" opacity="0.45">
+    <path d="M290,90 C295,55 302,20 308,0
+             C312,-12 320,-12 322,0
+             C326,20 318,55 310,90 Z"
+          fill="url(#flameOuter)"/>
+  </g>
+
+  <!-- Llama exterior izquierda -->
+  <g filter="url(#flameSoft)" opacity="0.45">
+    <path d="M222,90 C217,55 210,20 204,0
+             C200,-12 192,-12 190,0
+             C186,20 194,55 202,90 Z"
+          fill="url(#flameOuter)"/>
+  </g>
+
+  <!-- Llama media central -->
+  <path d="M256,85 C244,50 238,8 245,-22
+           C250,-35 262,-35 267,-22
+           C274,8 268,50 256,85 Z"
+        fill="url(#flameMid)" opacity="0.85"/>
+
+  <!-- Llama interna -->
+  <path d="M256,88 C248,60 244,25 249,-2
+           C253,-10 259,-10 263,-2
+           C268,25 264,60 256,88 Z"
+        fill="url(#flameInner)" opacity="0.9"/>
+
+  <!-- Punta blanca caliente -->
+  <path d="M256,90 C252,68 250,42 253,25
+           C255,20 257,20 259,25
+           C262,42 260,68 256,90 Z"
+        fill="url(#flameCore)" opacity="0.7"/>
+
+  <!-- === ESCUDO === -->
+  <g filter="url(#dropShadow)">
+    <!-- Borde brillante del escudo -->
+    <path d="M256,42
+             C256,42 410,70 430,78
+             C432,79 434,82 434,84
+             L434,240
+             C434,320 380,390 256,468
+             C132,390 78,320 78,240
+             L78,84
+             C78,82 80,79 82,78
+             C102,70 256,42 256,42 Z"
+          fill="url(#shieldEdge)"/>
+
+    <!-- Cuerpo del escudo (ligeramente más pequeño = borde visible) -->
+    <path d="M256,50
+             C256,50 404,76 422,83
+             C424,84 426,86 426,88
+             L426,238
+             C426,314 374,382 256,458
+             C138,382 86,314 86,238
+             L86,88
+             C86,86 88,84 90,83
+             C108,76 256,50 256,50 Z"
+          fill="url(#shieldMain)"/>
+  </g>
+
+  <!-- Brillo superior del escudo -->
+  <g clip-path="url(#shieldClip)">
+    <path d="M256,50
+             C256,50 404,76 422,83
+             L426,238 C426,238 426,180 256,50 Z"
+          fill="url(#shieldHighlight)"/>
+  </g>
+
+  <!-- === LLAMA CENTRAL dentro del escudo === -->
+
+  <!-- Glow de la brasa -->
+  <ellipse cx="256" cy="290" rx="100" ry="80" fill="url(#emberGlow)"/>
+
+  <!-- Llama grande dentro del escudo -->
+  <path d="M256,310
+           C230,280 215,245 220,205
+           C223,185 232,165 240,150
+           C245,140 248,155 248,170
+           C248,185 242,200 245,185
+           C250,165 256,140 256,130
+           C256,140 262,165 267,185
+           C270,200 264,185 264,170
+           C264,155 267,140 272,150
+           C280,165 289,185 292,205
+           C297,245 282,280 256,310 Z"
+        fill="url(#flameOuter)" opacity="0.9"/>
+
+  <!-- Llama media interior -->
+  <path d="M256,305
+           C236,280 225,250 228,218
+           C230,200 238,180 245,168
+           C250,160 252,175 252,188
+           C253,170 256,152 256,145
+           C256,152 259,170 260,188
+           C260,175 262,160 267,168
+           C274,180 282,200 284,218
+           C287,250 276,280 256,305 Z"
+        fill="url(#flameMid)" opacity="0.9"/>
+
+  <!-- Llama interna brillante -->
+  <path d="M256,298
+           C242,278 234,255 236,230
+           C238,215 244,198 250,188
+           C254,182 255,195 255,205
+           C256,192 256,178 256,172
+           C256,178 256,192 257,205
+           C257,195 258,182 262,188
+           C268,198 274,215 276,230
+           C278,255 270,278 256,298 Z"
+        fill="url(#flameInner)" opacity="0.95"/>
+
+  <!-- Nucleo blanco de la llama -->
+  <path d="M256,290
+           C248,275 242,260 244,242
+           C245,232 250,220 254,214
+           C256,210 258,214 258,222
+           C260,214 256,210 258,214
+           C262,220 267,232 268,242
+           C270,260 264,275 256,290 Z"
+        fill="url(#flameCore)" opacity="0.85"/>
+
+  <!-- Punto caliente -->
+  <circle cx="256" cy="265" r="8" fill="white" opacity="0.5"/>
+  <circle cx="256" cy="262" r="4" fill="white" opacity="0.75"/>
+
+  <!-- === DETALLES DEL ESCUDO === -->
+
+  <!-- Línea divisoria sutil horizontal -->
+  <g clip-path="url(#shieldClip)">
+    <line x1="86" y1="240" x2="426" y2="240" stroke="#FF8C00" stroke-width="1" opacity="0.15"/>
+  </g>
+
+  <!-- Reflejo sutil en la parte superior -->
+  <g clip-path="url(#shieldClip)">
+    <ellipse cx="220" cy="100" rx="100" ry="35" fill="white" opacity="0.04"/>
+  </g>
+</svg>

@@ -45,6 +45,7 @@ struct TabBar: View {
             .padding(.trailing, 8)
         }
         .background(TabBarBackground())
+        .colorScheme(browserState.isIncognito ? .dark : .light)
     }
 }
 
@@ -59,11 +60,16 @@ struct TabItem: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            // Icono de suspendida o favicon
+            // Icono de suspendida, incógnito, o favicon
             if tab.isSuspended {
                 Image(systemName: "moon.zzz.fill")
                     .font(.system(size: 12))
                     .foregroundColor(.orange)
+                    .frame(width: 16, height: 16)
+            } else if tab.isIncognito {
+                Image(systemName: "eye.slash.fill")
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
                     .frame(width: 16, height: 16)
             } else if let favicon = tab.favicon {
                 Image(nsImage: favicon)
@@ -107,7 +113,7 @@ struct TabItem: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
         .frame(minWidth: 120, maxWidth: 200, minHeight: 30)
-        .background(TabItemBackground(isSelected: isSelected, isHovered: isHovered, isSuspended: tab.isSuspended))
+        .background(TabItemBackground(isSelected: isSelected, isHovered: isHovered, isSuspended: tab.isSuspended, isIncognito: tab.isIncognito))
         .cornerRadius(8)
         .onTapGesture {
             // Si está suspendida, restaurar al hacer clic
@@ -135,6 +141,14 @@ struct TabItem: View {
 
             Divider()
 
+            Button(action: {
+                WindowManager.shared.openNewWindow(isIncognito: true)
+            }) {
+                Label("Nueva Ventana Incógnito", systemImage: "eye.slash")
+            }
+
+            Divider()
+
             Button(action: onClose) {
                 Label("Cerrar Tab", systemImage: "xmark")
             }
@@ -147,24 +161,30 @@ struct TabItemBackground: View {
     let isSelected: Bool
     let isHovered: Bool
     var isSuspended: Bool = false
+    var isIncognito: Bool = false
 
     var body: some View {
         RoundedRectangle(cornerRadius: 8)
             .fill(backgroundColor)
             .overlay(
-                // Borde naranja para tabs suspendidas
                 RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(Color.orange.opacity(isSuspended ? 0.5 : 0), lineWidth: 1)
+                    .strokeBorder(borderColor, lineWidth: 1)
             )
+    }
+
+    private var borderColor: Color {
+        if isIncognito { return Color.gray.opacity(0.4) }
+        if isSuspended { return Color.orange.opacity(0.5) }
+        return Color.clear
     }
 
     private var backgroundColor: Color {
         if isSelected {
-            return isSuspended
-                ? Color.orange.opacity(0.15)
-                : Color(NSColor.controlBackgroundColor)
+            if isIncognito { return Color(red: 0.20, green: 0.21, blue: 0.24) }
+            if isSuspended { return Color.orange.opacity(0.15) }
+            return Color(NSColor.controlBackgroundColor)
         } else if isHovered {
-            return Color.gray.opacity(0.15)
+            return isIncognito ? Color(red: 0.16, green: 0.17, blue: 0.20) : Color.gray.opacity(0.15)
         } else {
             return Color.clear
         }
@@ -173,9 +193,13 @@ struct TabItemBackground: View {
 
 /// Fondo de la barra de pestañas
 struct TabBarBackground: View {
+    @EnvironmentObject var browserState: BrowserState
+
     var body: some View {
         Rectangle()
-            .fill(Color(NSColor.windowBackgroundColor).opacity(0.95))
+            .fill(browserState.isIncognito
+                  ? Color(red: 0.10, green: 0.10, blue: 0.12)
+                  : Color(NSColor.windowBackgroundColor).opacity(0.95))
             .overlay(
                 Rectangle()
                     .fill(Color.gray.opacity(0.2))

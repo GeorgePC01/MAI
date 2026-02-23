@@ -15,6 +15,9 @@ class BrowserState: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var loadingProgress: Double = 0
 
+    // Incognito window — all tabs inherit this mode
+    let isIncognito: Bool
+
     enum SidebarTab: String, CaseIterable {
         case bookmarks = "Favoritos"
         case history = "Historial"
@@ -60,9 +63,12 @@ class BrowserState: ObservableObject {
 
     // MARK: - Initialization
 
-    init() {
-        // Crear pestaña inicial
-        createTab(url: "about:blank")
+    init(isIncognito: Bool = false) {
+        self.isIncognito = isIncognito
+        // Crear pestaña inicial (hereda modo incógnito de la ventana)
+        let tab = Tab(url: "about:blank", isIncognito: isIncognito)
+        tabs.append(tab)
+        currentTabIndex = 0
 
         // Iniciar monitoreo de stats
         startStatsMonitoring()
@@ -75,24 +81,28 @@ class BrowserState: ObservableObject {
     // MARK: - Tab Management
 
     func createTab(url: String = "about:blank") {
-        let tab = Tab(url: url)
+        let tab = Tab(url: url, isIncognito: self.isIncognito)
         tabs.append(tab)
         currentTabIndex = tabs.count - 1
     }
 
-    func closeTab(at index: Int) {
-        guard tabs.count > 1 else { return }  // Mantener al menos 1 tab
+    func closeTab(at index: Int, force: Bool = false) {
+        guard force || tabs.count > 1 else { return }  // Mantener al menos 1 tab
 
-        // If closing a Chromium tab, release CEF browser
         let closingTab = tabs[index]
         if closingTab.useChromiumEngine {
-            CEFBridge.closeBrowser()
-            print("🔄 CEF browser closed for tab: \(closingTab.title)")
+            // CEF browser will be closed by CEFWebView.dismantleNSView (async)
+            // when SwiftUI removes the view from the hierarchy
+            print("🔄 Closing CEF tab: \(closingTab.title)")
         }
 
         tabs.remove(at: index)
 
-        if currentTabIndex >= tabs.count {
+        // If all tabs closed, create a blank one
+        if tabs.isEmpty {
+            tabs.append(Tab(isIncognito: self.isIncognito))
+            currentTabIndex = 0
+        } else if currentTabIndex >= tabs.count {
             currentTabIndex = tabs.count - 1
         }
     }
@@ -137,13 +147,36 @@ class BrowserState: ObservableObject {
 
         // Auto-detect video conferencing domains → use Chromium engine
         let shouldUseChromium = Self.shouldUseChromiumEngine(for: finalURL)
-        if shouldUseChromium != tab.useChromiumEngine {
-            tab.useChromiumEngine = shouldUseChromium
-            if shouldUseChromium {
-                print("🔄 Switching to Chromium engine for: \(finalURL)")
-            } else {
-                print("🔄 Switching back to WebKit engine")
+
+        if tab.useChromiumEngine {
+            // Tab already in Chromium — all navigation goes through CEF.
+            // CEF close/release always crashes, so we never switch back to WebKit.
+            print("🔄 Navigating in Chromium: \(finalURL)")
+            CEFBridge.loadURL(finalURL)
+            return
+        }
+
+        if shouldUseChromium {
+            // CEF is a singleton — only one Chromium browser at a time.
+            // If another tab already uses Chromium, reuse it.
+            // All video conferencing (Meet/Zoom/Teams) uses embedded Alloy mode.
+            // Standalone mode removed — parent_view forces Alloy anyway, and
+            // a separate window breaks Microsoft auth cookie flow.
+            if let existingCEFTab = tabs.first(where: { $0.useChromiumEngine }),
+               let cefIndex = tabs.firstIndex(where: { $0.id == existingCEFTab.id }) {
+                print("🔄 Reusing existing Chromium tab for: \(finalURL)")
+                CEFBridge.loadURL(finalURL)
+                existingCEFTab.url = finalURL
+                existingCEFTab.title = "Loading..."
+                currentTabIndex = cefIndex
+                return
             }
+            // No existing CEF tab — switch this tab to Chromium
+            tab.useChromiumEngine = true
+            tab.useStandaloneChromium = false
+            print("🔄 Switching to Chromium engine for: \(finalURL)")
+            tab.navigate(to: finalURL)
+            return
         }
 
         tab.navigate(to: finalURL)
@@ -443,7 +476,15 @@ class BrowserState: ObservableObject {
         "zoom.us",
         "app.zoom.us",
         "teams.microsoft.com",
-        "teams.live.com"
+        "teams.live.com",
+        "teams.cloud.microsoft"
+    ]
+
+    /// Teams domains that need standalone Chrome-style window for screen sharing
+    private static let teamsDomains: Set<String> = [
+        "teams.microsoft.com",
+        "teams.live.com",
+        "teams.cloud.microsoft"
     ]
 
     /// Determina si una URL debería usar Chromium engine
@@ -451,6 +492,13 @@ class BrowserState: ObservableObject {
         guard let url = URL(string: urlString),
               let host = url.host?.lowercased() else { return false }
         return videoConferenceDomains.contains { host == $0 || host.hasSuffix("." + $0) }
+    }
+
+    /// Determina si una URL es Teams (necesita Chrome-style standalone)
+    static func isTeamsDomain(for urlString: String) -> Bool {
+        guard let url = URL(string: urlString),
+              let host = url.host?.lowercased() else { return false }
+        return teamsDomains.contains { host == $0 || host.hasSuffix("." + $0) }
     }
 
     /// Verifica si la URL actual es un sitio de videoconferencia
@@ -537,6 +585,9 @@ class Tab: ObservableObject, Identifiable {
     @Published var canGoForward: Bool = false
     @Published var zoomLevel: Double = 1.0
 
+    // Pending close: tab will be removed after CEF browser fully closes
+    var pendingClose: Bool = false
+
     // Tab Suspension
     @Published var isSuspended: Bool = false
     @Published var suspendedSnapshot: NSImage?
@@ -545,11 +596,17 @@ class Tab: ObservableObject, Identifiable {
 
     // CEF Hybrid Engine - true when tab uses Chromium (video conferencing)
     @Published var useChromiumEngine: Bool = false
+    // True when Teams uses standalone Chrome-style window (for screen sharing)
+    @Published var useStandaloneChromium: Bool = false
+
+    // Incognito mode - no history, non-persistent cookies/cache
+    let isIncognito: Bool
 
     weak var webView: WKWebView?
 
-    init(url: String = "about:blank") {
+    init(url: String = "about:blank", isIncognito: Bool = false) {
         self.url = url
+        self.isIncognito = isIncognito
     }
 
     /// Registra interacción del usuario (para ML futuro)

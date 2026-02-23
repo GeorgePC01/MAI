@@ -6,8 +6,11 @@ class WindowManager {
     static let shared = WindowManager()
     private var windows: [(window: NSWindow, state: BrowserState)] = []
 
-    func openNewWindow() {
-        let browserState = BrowserState()
+    func openNewWindow(url: String? = nil, isIncognito: Bool = false) {
+        let browserState = BrowserState(isIncognito: isIncognito)
+        if let url = url {
+            browserState.navigate(to: url)
+        }
         let contentView = BrowserView()
             .environmentObject(browserState)
             .frame(minWidth: 800, minHeight: 600)
@@ -19,9 +22,12 @@ class WindowManager {
             defer: false
         )
         window.contentView = NSHostingView(rootView: contentView)
-        window.title = "MAI Browser"
+        window.title = isIncognito ? "MAI Browser — Incógnito" : "MAI Browser"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        if isIncognito {
+            window.backgroundColor = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1.0)
+        }
         window.center()
 
         // Offset ligeramente de la ventana actual
@@ -49,7 +55,8 @@ class WindowManager {
             }
         }
 
-        print("🪟 Nueva ventana abierta (\(windows.count + 1) ventanas activas)")
+        let modeLabel = isIncognito ? "incógnito" : "normal"
+        print("🪟 Nueva ventana \(modeLabel) abierta (\(windows.count + 1) ventanas activas)")
     }
 
     var windowCount: Int {
@@ -82,6 +89,11 @@ struct MAIApp: App {
                     WindowManager.shared.openNewWindow()
                 }
                 .keyboardShortcut("n", modifiers: .command)
+
+                Button("Nueva Ventana Incógnito") {
+                    WindowManager.shared.openNewWindow(isIncognito: true)
+                }
+                .keyboardShortcut("n", modifiers: [.command, .shift])
 
                 Divider()
 
@@ -192,19 +204,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("MAI Browser iniciado")
 
-        // Seguir el tema del sistema (claro/oscuro automático)
-        // NSApplication.shared.appearance = NSAppearance(named: .darkAqua)  // Descomentar para forzar oscuro
-
         // Activar la aplicación
         NSApp.activate(ignoringOtherApps: true)
-
-        // Asegurar que la ventana tome foco
-        DispatchQueue.main.async {
-            if let window = NSApp.windows.first {
-                window.makeKeyAndOrderFront(nil)
-                window.orderFrontRegardless()
-            }
-        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -220,8 +221,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationDidBecomeActive(_ notification: Notification) {
-        if let window = NSApplication.shared.windows.first {
-            window.makeKeyAndOrderFront(nil)
-        }
+        // SwiftUI ya maneja el foco de ventanas automáticamente
     }
 }

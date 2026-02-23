@@ -8,6 +8,7 @@ import CEFWrapper
 struct CEFWebView: NSViewRepresentable {
     let url: String
     @ObservedObject var tab: Tab
+    @ObservedObject var browserState: BrowserState
 
     /// Container view that hosts the CEF browser.
     /// CRITICAL: Browser creation is deferred until this view is added to a window.
@@ -39,6 +40,9 @@ struct CEFWebView: NSViewRepresentable {
             browserView?.frame = bounds
         }
 
+        // Whether this browser opens in a standalone NSWindow (Teams)
+        var useStandalone = false
+
         private func createBrowser(url: String) {
             guard window != nil else {
                 NSLog("[CEF] Window gone before browser creation, aborting")
@@ -60,18 +64,33 @@ struct CEFWebView: NSViewRepresentable {
                 CEFBridge.delegate = coordinator
             }
 
-            // Use our actual bounds (should be non-zero now that we're in a window)
-            let frame = bounds.isEmpty ? NSRect(x: 0, y: 0, width: 800, height: 600) : bounds
-            NSLog("[CEF] Creating browser in window, frame: \(frame)")
-
-            if let cefView = CEFBridge.createBrowserView(withURL: url, frame: frame) {
-                cefView.frame = bounds
-                cefView.autoresizingMask = [.width, .height]
-                addSubview(cefView)
-                browserView = cefView
-                NSLog("[CEF] Browser view added to host (in window)")
+            if useStandalone {
+                // Teams: open in its own native NSWindow with embedded Alloy browser.
+                // getDisplayMedia handled by our native picker (JSDialog + ScreenCaptureKit).
+                NSLog("[CEF] Opening standalone NSWindow browser for Teams: \(url)")
+                CEFBridge.openStandaloneBrowser(withURL: url)
+                // Show a placeholder message in the SwiftUI-hosted view
+                let label = NSTextField(labelWithString: "Teams meeting open in dedicated window")
+                label.font = NSFont.systemFont(ofSize: 16, weight: .medium)
+                label.textColor = .secondaryLabelColor
+                label.alignment = .center
+                label.frame = bounds
+                label.autoresizingMask = [.width, .height]
+                addSubview(label)
             } else {
-                NSLog("[CEF] ERROR: createBrowserView returned nil")
+                // Meet/Zoom: embedded Alloy-style browser in SwiftUI view
+                let frame = bounds.isEmpty ? NSRect(x: 0, y: 0, width: 800, height: 600) : bounds
+                NSLog("[CEF] Creating embedded Alloy browser, frame: \(frame)")
+
+                if let cefView = CEFBridge.createBrowserView(withURL: url, frame: frame) {
+                    cefView.frame = bounds
+                    cefView.autoresizingMask = [.width, .height]
+                    addSubview(cefView)
+                    browserView = cefView
+                    NSLog("[CEF] Browser view added to host (in window)")
+                } else {
+                    NSLog("[CEF] ERROR: createBrowserView returned nil")
+                }
             }
         }
     }
@@ -84,6 +103,7 @@ struct CEFWebView: NSViewRepresentable {
         // Store URL and coordinator for deferred browser creation
         hostView.pendingURL = url
         hostView.coordinator = context.coordinator
+        hostView.useStandalone = tab.useStandaloneChromium
 
         return hostView
     }
@@ -93,31 +113,37 @@ struct CEFWebView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ hostView: CEFHostView, coordinator: Coordinator) {
-        // Close the CEF browser when the view is removed
-        CEFBridge.closeBrowser()
+        // Force-release embedded CEF browser. Using forceReleaseBrowser instead of closeBrowser
+        // because closeBrowser's message pump processing crashes with unrecognized selector
+        // when the view is being removed from the hierarchy.
+        CEFBridge.forceReleaseBrowser()
     }
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(tab: tab)
+        Coordinator(tab: tab, browserState: browserState)
     }
 
     /// Coordinator receives CEF browser events and updates the Tab model
     class Coordinator: NSObject, CEFBridgeDelegate {
         var tab: Tab
+        var browserState: BrowserState
 
-        init(tab: Tab) {
+        init(tab: Tab, browserState: BrowserState) {
             self.tab = tab
+            self.browserState = browserState
         }
 
         func cefBrowserDidStartLoading() {
             DispatchQueue.main.async { [weak self] in
                 self?.tab.isLoading = true
+                self?.browserState.isLoading = true
             }
         }
 
         func cefBrowserDidFinishLoading() {
             DispatchQueue.main.async { [weak self] in
                 self?.tab.isLoading = false
+                self?.browserState.isLoading = false
             }
         }
 
@@ -136,12 +162,22 @@ struct CEFWebView: NSViewRepresentable {
         func cefBrowserDidUpdateLoadProgress(_ progress: Double) {
             DispatchQueue.main.async { [weak self] in
                 self?.tab.loadProgress = progress
+                self?.browserState.loadingProgress = progress
             }
         }
 
         func cefBrowserDidClose() {
             DispatchQueue.main.async { [weak self] in
-                self?.tab.isLoading = false
+                guard let self = self else { return }
+                self.tab.isLoading = false
+                self.browserState.isLoading = false
+                // If tab was marked for pending close (CEF → WebKit transition),
+                // remove it now that the browser is fully closed and views are safe to tear down.
+                if self.tab.pendingClose {
+                    if let index = self.browserState.tabs.firstIndex(where: { $0.id == self.tab.id }) {
+                        self.browserState.closeTab(at: index, force: true)
+                    }
+                }
             }
         }
     }

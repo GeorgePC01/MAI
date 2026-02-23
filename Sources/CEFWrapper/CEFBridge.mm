@@ -15,8 +15,12 @@
 #include "include/capi/cef_display_handler_capi.h"
 #include "include/capi/cef_permission_handler_capi.h"
 #include "include/capi/cef_request_handler_capi.h"
+#include "include/capi/cef_resource_request_handler_capi.h"
 #include "include/capi/cef_browser_process_handler_capi.h"
 #include "include/capi/cef_jsdialog_handler_capi.h"
+#include "include/capi/cef_request_context_capi.h"
+// NOTE: Views framework headers removed — Views is incompatible with
+// external_message_pump=1 on macOS (requires MessagePumpNSApplication).
 #include "include/cef_api_hash.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -52,6 +56,15 @@ static cef_browser_t* g_browser = NULL;
 static NSView* g_browserView = NULL;
 static NSTimer* g_messagePumpTimer = nil;
 static __weak id<CEFBridgeDelegate> g_delegate = nil;
+
+// Standalone mode: Teams in its own NSWindow (still Alloy-style, but separate window)
+static BOOL g_isStandaloneMode = NO;
+static NSWindow* g_standaloneNSWindow = nil;
+
+// Forward declarations
+static void stopMessagePump(void);
+static void startMessagePump(void);
+static void enumerate_cookies_for_url(const char* label);
 
 // MARK: - Reference Counting Helpers
 
@@ -258,12 +271,26 @@ static int CEF_CALLBACK do_close(cef_life_span_handler_t* self,
 
 static void CEF_CALLBACK on_before_close(cef_life_span_handler_t* self,
                                           cef_browser_t* browser) {
-    NSLog(@"[CEF] Browser closed");
+    NSLog(@"[CEF] Browser closed (standalone=%d)", g_isStandaloneMode);
     if (g_browser) {
         cef_release(&g_browser->base);
         g_browser = NULL;
     }
     g_browserView = nil;
+
+    // Close standalone NSWindow if present
+    if (g_isStandaloneMode && g_standaloneNSWindow) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [g_standaloneNSWindow close];
+            g_standaloneNSWindow = nil;
+        });
+        g_isStandaloneMode = NO;
+    }
+
+    // Stop message pump - no browser to service.
+    // CRITICAL: Must stop here to prevent cef_do_message_loop_work() from
+    // accessing deallocated NSViews (causes unrecognized selector crash).
+    stopMessagePump();
 
     dispatch_async(dispatch_get_main_queue(), ^{
         id<CEFBridgeDelegate> delegate = g_delegate;
@@ -273,12 +300,62 @@ static void CEF_CALLBACK on_before_close(cef_life_span_handler_t* self,
     });
 }
 
+/// Handle popup requests — Microsoft auth (MFA) requires popups that share cookies.
+/// Instead of opening a new window, navigate the current browser to the popup URL.
+/// This keeps the contextID cookie in the same browser context.
+static int CEF_CALLBACK on_before_popup(
+    cef_life_span_handler_t* self,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    int popup_id,
+    const cef_string_t* target_url,
+    const cef_string_t* target_frame_name,
+    cef_window_open_disposition_t target_disposition,
+    int user_gesture,
+    const cef_popup_features_t* popupFeatures,
+    cef_window_info_t* windowInfo,
+    cef_client_t** client,
+    cef_browser_settings_t* settings,
+    cef_dictionary_value_t** extra_info,
+    int* no_javascript_access) {
+
+    NSString* url = target_url ? nsstring_from_cef_string(target_url) : @"";
+    NSLog(@"[CEF] on_before_popup: %@", url);
+    cef_log_to_file("POPUP request: %s", [url UTF8String]);
+
+    // Allow Microsoft auth popups by navigating in the same browser window.
+    // This preserves the contextID cookie that MFA sets during the auth flow.
+    if ([url containsString:@"login.microsoftonline.com"] ||
+        [url containsString:@"login.live.com"] ||
+        [url containsString:@"login.microsoft.com"] ||
+        [url containsString:@"accounts.google.com"] ||
+        [url containsString:@"appleid.apple.com"]) {
+
+        cef_log_to_file("POPUP -> navigating in same browser (auth URL): %s", [url UTF8String]);
+        // Navigate main frame to the popup URL instead of opening new window
+        if (browser) {
+            cef_frame_t* mainFrame = browser->get_main_frame(browser);
+            if (mainFrame) {
+                cef_string_t cefURL = cef_string_from_nsstring(url);
+                mainFrame->load_url(mainFrame, &cefURL);
+                cef_string_clear(&cefURL);
+                cef_release(&mainFrame->base);
+            }
+        }
+        return 1; // Cancel popup (we navigated instead)
+    }
+
+    // Block all other popups (ads, etc.)
+    cef_log_to_file("POPUP -> blocked (non-auth URL): %s", [url UTF8String]);
+    return 1;
+}
+
 static void init_life_span_handler() {
     init_simple_ref(&g_lifeSpanHandler.base, sizeof(cef_life_span_handler_t));
     g_lifeSpanHandler.on_after_created = on_after_created;
     g_lifeSpanHandler.do_close = do_close;
     g_lifeSpanHandler.on_before_close = on_before_close;
-    // on_before_popup: NULL (block popups, handle in WebKit)
+    g_lifeSpanHandler.on_before_popup = on_before_popup;
 }
 
 // Forward declarations for window capture (defined after Permission Handler)
@@ -296,114 +373,233 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                                                    int isLoading,
                                                    int canGoBack,
                                                    int canGoForward) {
-    // Inject getDisplayMedia override on video conference sites
+    // Re-enabled for diagnostic logging only
     if (!isLoading && browser) {
         cef_frame_t* frame = browser->get_main_frame(browser);
         if (frame) {
             cef_string_userfree_t frameUrl = frame->get_url(frame);
             if (frameUrl) {
                 NSString* urlStr = nsstring_from_cef_string(frameUrl);
-                if ([urlStr containsString:@"meet.google.com"] ||
-                    [urlStr containsString:@"zoom.us"] ||
-                    [urlStr containsString:@"teams.microsoft.com"]) {
+                // Match video conference HOSTNAMES only — not query params!
+                // login.live.com URLs contain "teams.microsoft.com" in the
+                // redirect_uri parameter, so containsString would incorrectly
+                // inject WebRTC patches on login pages, breaking authentication.
+                BOOL isVideoConferenceSite =
+                    [urlStr hasPrefix:@"https://meet.google.com"] ||
+                    [urlStr hasPrefix:@"https://zoom.us"] ||
+                    [urlStr hasPrefix:@"https://teams.microsoft.com"] ||
+                    [urlStr hasPrefix:@"https://teams.live.com"] ||
+                    [urlStr hasPrefix:@"https://teams.cloud.microsoft"];
+                if (isVideoConferenceSite) {
 
-                    NSString* js =
+                    // Common JS: error handlers, codec diagnostics, H.264 SDP removal,
+                    // and WebRTC interceptors for logging.
+                    // In standalone Chrome-style mode: NO getDisplayMedia override
+                    // (Chrome's native DesktopMediaPicker works).
+                    // In embedded Alloy mode: getDisplayMedia override with native
+                    // picker + getUserMedia fallback.
+                    NSMutableString* js = [NSMutableString stringWithString:
                         @"(function(){"
                         "if(window.__maiPickerInstalled)return;"
                         "window.__maiPickerInstalled=true;"
-                        "console.log('[MAI] Installing getDisplayMedia override');"
-                        "const real=navigator.mediaDevices.getDisplayMedia.bind(navigator.mediaDevices);"
-                        "navigator.mediaDevices.getDisplayMedia=async function(c){"
-                            "console.log('[MAI] getDisplayMedia intercepted, constraints:', JSON.stringify(c));"
-                            "const s=window.prompt('MAI_SCREEN_PICKER');"
-                            "console.log('[MAI] Picker result:', s);"
-                            "if(!s)throw new DOMException('Permission denied','NotAllowedError');"
-                            "if(s==='SCREEN'){"
-                                "console.log('[MAI] Calling real getDisplayMedia for screen');"
-                                "return real.call(navigator.mediaDevices,c);"
-                            "}else if(s==='WINDOW'){"
-                                "try{"
-                                    "console.log('[MAI] Creating canvas stream for window capture');"
-                                    "const cv=document.createElement('canvas');"
-                                    "cv.width=1280;cv.height=720;"
-                                    "const cx=cv.getContext('2d');"
-                                    // Draw initial black frame so stream is never empty
-                                    "cx.fillStyle='#000';"
-                                    "cx.fillRect(0,0,1280,720);"
-                                    "cx.fillStyle='#fff';cx.font='24px sans-serif';"
-                                    "cx.fillText('Connecting...',560,360);"
-                                    // captureStream(5) = auto-produce frames at 5fps
-                                    "const st=cv.captureStream(5);"
-                                    "const vt=st.getVideoTracks()[0];"
-                                    "console.log('[MAI] Canvas track created, state:', vt.readyState,"
-                                        "'settings:', JSON.stringify(vt.getSettings()));"
-                                    // Override getSettings to fake displaySurface metadata
-                                    "const origGS=vt.getSettings.bind(vt);"
-                                    "vt.getSettings=function(){"
-                                        "const r=origGS();"
-                                        "r.displaySurface='window';"
-                                        "r.logicalSurface=true;"
-                                        "r.cursor='always';"
-                                        "return r;"
-                                    "};"
-                                    // Add silent audio track (Meet may require audio)
-                                    "try{"
-                                        "const actx=new AudioContext();"
-                                        "const osc=actx.createOscillator();"
-                                        "const gn=actx.createGain();"
-                                        "gn.gain.value=0;"
-                                        "osc.connect(gn);"
-                                        "const dest=actx.createMediaStreamDestination();"
-                                        "gn.connect(dest);"
-                                        "osc.start();"
-                                        "st.addTrack(dest.stream.getAudioTracks()[0]);"
-                                        "console.log('[MAI] Added silent audio track');"
-                                        "vt.addEventListener('ended',function(){"
-                                            "actx.close();"
-                                        "});"
-                                    "}catch(ae){console.warn('[MAI] Audio track failed:',ae);}"
-                                    // Frame receiver from native SCStream capture
-                                    // Use 'copy' compositing to replace pixels with full opacity
-                                    "cx.globalCompositeOperation='copy';"
-                                    "window.__maiFrame=function(d){"
-                                        "const im=new Image();"
-                                        "im.onload=function(){"
-                                            "if(cv.width!==im.width||cv.height!==im.height){"
-                                                "cv.width=im.width;cv.height=im.height;"
-                                                "cx.globalCompositeOperation='copy';"
-                                            "}"
-                                            "cx.drawImage(im,0,0);"
-                                        "};"
-                                        "im.src='data:image/jpeg;base64,'+d;"
-                                    "};"
-                                    // Cleanup function to stop native capture
-                                    "function _maiCleanup(){"
-                                        "console.log('[MAI] Cleaning up window capture');"
-                                        "clearInterval(_maiCheck);"
-                                        "delete window.__maiFrame;"
-                                        "try{window.prompt('MAI_STOP_CAPTURE');}catch(e){}"
-                                    "}"
-                                    // Periodic check: if track died or was removed, stop capture
-                                    "const _maiCheck=setInterval(function(){"
-                                        "if(vt.readyState!=='live'){"
-                                            "console.log('[MAI] Track no longer live, state:', vt.readyState);"
-                                            "_maiCleanup();"
-                                        "}"
-                                    "},2000);"
-                                    "vt.addEventListener('ended',function(){"
-                                        "console.log('[MAI] Window track ended event');"
-                                        "_maiCleanup();"
-                                    "});"
-                                    "console.log('[MAI] Returning stream with',st.getTracks().length,'tracks');"
-                                    "return st;"
-                                "}catch(e){"
-                                    "console.error('[MAI] Window capture JS error:',e);"
-                                    "throw e;"
+                        "console.log('[MAI] Installing WebRTC patches (standalone=%s)'.replace('%s',"];
+
+                    // Inject standalone mode flag as JS boolean
+                    [js appendFormat:@"'%@'));", g_isStandaloneMode ? @"true" : @"false"];
+
+                    [js appendString:
+                        // Global error catcher with stack traces
+                        @"if(!window.__maiErrorHandler){"
+                            "window.__maiErrorHandler=true;"
+                            "window.addEventListener('unhandledrejection',function(e){"
+                                "const r=e.reason;"
+                                "if(r&&r.stack)console.log('[MAI] UNHANDLED REJECTION:',r.message,'\\n'+r.stack);"
+                            "});"
+                            "window.addEventListener('error',function(e){"
+                                "if(e.error&&e.error.stack)console.log('[MAI] GLOBAL ERROR:',e.error.message,'\\n'+e.error.stack);"
+                            "});"
+                        "}"
+
+                        // === SPOOF 2: navigator.permissions.query for display-capture ===
+                        // CEF Alloy may return 'denied' for display-capture permission.
+                        // Teams checks this before calling getDisplayMedia.
+                        "if(!window.__maiPermSpoofed){"
+                            "window.__maiPermSpoofed=true;"
+                            "const origQuery=navigator.permissions.query.bind(navigator.permissions);"
+                            "navigator.permissions.query=function(desc){"
+                                "console.log('[MAI] permissions.query:', JSON.stringify(desc));"
+                                "if(desc&&desc.name==='display-capture'){"
+                                    "console.log('[MAI] Spoofing display-capture permission to prompt');"
+                                    "return Promise.resolve({state:'prompt',name:'display-capture',onchange:null});"
                                 "}"
+                                "return origQuery(desc);"
+                            "};"
+                            "console.log('[MAI] Permission spoofing installed');"
+                        "}"
+
+                        // === SPOOF 3: MediaStreamTrack.getSettings displaySurface ===
+                        // Teams may check for displaySurface property in track settings.
+                        "if(!window.__maiTrackSpoofed){"
+                            "window.__maiTrackSpoofed=true;"
+                            "const origGetSettings=MediaStreamTrack.prototype.getSettings;"
+                            "MediaStreamTrack.prototype.getSettings=function(){"
+                                "const s=origGetSettings.call(this);"
+                                "if(this.kind==='video'&&this.label&&this.label.includes('Screen')&&!s.displaySurface){"
+                                    "s.displaySurface='monitor';"
+                                    "s.cursor='always';"
+                                    "console.log('[MAI] Added displaySurface to track settings:', JSON.stringify(s));"
+                                "}"
+                                "return s;"
+                            "};"
+                        "}"
+
+                        // Log available WebRTC codecs once for diagnostics
+                        "try{"
+                            "const vc=RTCRtpSender.getCapabilities('video');"
+                            "if(vc&&vc.codecs){"
+                                "const names=[...new Set(vc.codecs.map(c=>c.mimeType))];"
+                                "console.log('[MAI] WebRTC video codecs:', names.join(', '));"
+                                "console.log('[MAI] H264 available:', names.some(n=>n.includes('264')));"
                             "}"
-                            "return real.call(navigator.mediaDevices,c);"
-                        "};"
-                        "})();";
+                        "}catch(e){console.warn('[MAI] Codec check failed:', e);}"
+
+                        // Intercept RTCPeerConnection — diagnostic logging for WebRTC
+                        "if(!window.__maiRTCPatched){"
+                            "window.__maiRTCPatched=true;"
+
+                            "const origSetLocal=RTCPeerConnection.prototype.setLocalDescription;"
+                            "RTCPeerConnection.prototype.setLocalDescription=function(desc){"
+                                "if(desc&&desc.sdp){"
+                                    "const codecs=desc.sdp.split('\\n').filter(l=>/^a=rtpmap/.test(l)).map(l=>l.split(' ')[1]);"
+                                    "console.log('[MAI] setLocalDescription('+desc.type+') codecs:', codecs.join(', '));"
+                                "}"
+                                "return origSetLocal.apply(this,[desc]);"
+                            "};"
+
+                            "const origSetRemote=RTCPeerConnection.prototype.setRemoteDescription;"
+                            "RTCPeerConnection.prototype.setRemoteDescription=function(desc){"
+                                "if(desc&&desc.sdp){"
+                                    "const codecs=desc.sdp.split('\\n').filter(l=>/^a=rtpmap/.test(l)).map(l=>l.split(' ')[1]);"
+                                    "console.log('[MAI] setRemoteDescription('+desc.type+') codecs:', codecs.join(', '));"
+                                "}"
+                                "return origSetRemote.apply(this,[desc]);"
+                            "};"
+
+                            "const origAddTrack=RTCPeerConnection.prototype.addTrack;"
+                            "RTCPeerConnection.prototype.addTrack=function(track){"
+                                "console.log('[MAI] addTrack:', track.kind, track.label, track.readyState);"
+                                "return origAddTrack.apply(this,arguments);"
+                            "};"
+
+                            // Log replaceTrack for screen sharing diagnostics
+                            "const origReplaceTrack=RTCRtpSender.prototype.replaceTrack;"
+                            "RTCRtpSender.prototype.replaceTrack=function(track){"
+                                "console.log('[MAI] replaceTrack:', track?(track.kind+':'+track.label+':'+track.readyState):'null');"
+                                "return origReplaceTrack.apply(this,arguments);"
+                            "};"
+
+                            "const origAddTransceiver=RTCPeerConnection.prototype.addTransceiver;"
+                            "RTCPeerConnection.prototype.addTransceiver=function(trackOrKind,init){"
+                                "const label=typeof trackOrKind==='string'?trackOrKind:trackOrKind.label||trackOrKind.kind;"
+                                "console.log('[MAI] addTransceiver:', label, init?JSON.stringify(init):'');"
+                                "return origAddTransceiver.apply(this,arguments);"
+                            "};"
+
+                            "const origCreateOffer=RTCPeerConnection.prototype.createOffer;"
+                            "RTCPeerConnection.prototype.createOffer=function(opts){"
+                                "console.log('[MAI] createOffer called, senders:', this.getSenders().map(s=>s.track?(s.track.kind+':'+s.track.label):null).filter(Boolean).join(', '));"
+                                "return origCreateOffer.apply(this,arguments);"
+                            "};"
+
+                            "const origClose=RTCPeerConnection.prototype.close;"
+                            "RTCPeerConnection.prototype.close=function(){"
+                                "console.log('[MAI] RTCPeerConnection.close()');"
+                                "return origClose.apply(this,arguments);"
+                            "};"
+                        "}"];
+
+                    // Override getDisplayMedia with native screen/window picker
+                    // Flow: JS prompt('MAI_SCREEN_PICKER') → ObjC JSDialog handler →
+                    // SCShareableContent → NSAlert picker → SCStream capture →
+                    // JPEG base64 frames → window.__maiFrame → canvas → captureStream
+                    [js appendString:
+                        @"if(navigator.mediaDevices){"
+                            "navigator.mediaDevices.getDisplayMedia=function(constraints){"
+                                "return new Promise(function(resolve,reject){"
+                                    "console.log('[MAI] getDisplayMedia: showing native picker');"
+                                    "var result=prompt('MAI_SCREEN_PICKER');"
+                                    "if(!result){"
+                                        "console.log('[MAI] getDisplayMedia: user cancelled');"
+                                        "reject(new DOMException('Permission denied','NotAllowedError'));"
+                                        "return;"
+                                    "}"
+                                    "console.log('[MAI] getDisplayMedia: selected source:', result);"
+
+                                    // Create canvas for frame relay
+                                    "var canvas=document.createElement('canvas');"
+                                    "canvas.width=1920;canvas.height=1080;"
+                                    "var ctx=canvas.getContext('2d');"
+
+                                    // Draw initial black frame (captureStream needs at least 1 frame)
+                                    "ctx.fillStyle='#000';"
+                                    "ctx.fillRect(0,0,1920,1080);"
+                                    "ctx.fillStyle='#fff';ctx.font='24px sans-serif';"
+                                    "ctx.fillText('Starting screen share...',60,60);"
+
+                                    // Frame callback: native code sends JPEG base64 via executeJavaScript
+                                    "var img=new Image();"
+                                    "window.__maiFrame=function(b64){"
+                                        "img.onload=function(){"
+                                            "if(canvas.width!==img.naturalWidth||canvas.height!==img.naturalHeight){"
+                                                "canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;"
+                                            "}"
+                                            "ctx.drawImage(img,0,0);"
+                                        "};"
+                                        "img.src='data:image/jpeg;base64,'+b64;"
+                                    "};"
+
+                                    // Create MediaStream from canvas
+                                    "var stream=canvas.captureStream(5);"
+
+                                    // Add silent audio track (some apps require it)
+                                    "try{"
+                                        "var ac=new AudioContext();"
+                                        "var osc=ac.createOscillator();"
+                                        "var g=ac.createGain();g.gain.value=0;"
+                                        "osc.connect(g);"
+                                        "var dest=ac.createMediaStreamDestination();"
+                                        "g.connect(dest);osc.start();"
+                                        "stream.addTrack(dest.stream.getAudioTracks()[0]);"
+                                    "}catch(e){console.warn('[MAI] Audio track creation failed:',e);}"
+
+                                    // Add displaySurface metadata to video track
+                                    "var vt=stream.getVideoTracks()[0];"
+                                    "if(vt){"
+                                        "var isScreen=result.startsWith('screen:');"
+                                        "var origGS=vt.getSettings.bind(vt);"
+                                        "vt.getSettings=function(){"
+                                            "var s=origGS();"
+                                            "s.displaySurface=isScreen?'monitor':'window';"
+                                            "s.cursor='always';"
+                                            "return s;"
+                                        "};"
+
+                                        // Cleanup when track ends (user stops sharing)
+                                        "vt.addEventListener('ended',function(){"
+                                            "console.log('[MAI] Screen share track ended, stopping capture');"
+                                            "prompt('MAI_STOP_CAPTURE');"
+                                            "window.__maiFrame=null;"
+                                        "});"
+                                    "}"
+
+                                    "console.log('[MAI] getDisplayMedia: returning canvas stream, tracks:', "
+                                        "stream.getTracks().map(function(t){return t.kind+':'+t.readyState;}).join(', '));"
+                                    "resolve(stream);"
+                                "});"
+                            "};"
+                        "}"];
+
+                    [js appendString:@"})();"];
 
                     cef_string_t script = cef_string_from_nsstring(js);
                     cef_string_t scriptUrl = cef_string_from_nsstring(@"about:blank");
@@ -413,6 +609,57 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                     cef_log_to_file("Injected getDisplayMedia override on %s",
                                     [urlStr UTF8String]);
                 }
+
+                // DIAGNOSTIC ONLY: Log document.cookie at form submit time.
+                // Does NOT intercept or override anything — just reads.
+                if ([urlStr containsString:@"login.live.com"]) {
+                    // Enumerate cookies in CEF's internal store for this URL
+                    NSString* enumLabel = [NSString stringWithFormat:@"page-loaded:%@",
+                        [urlStr length] > 60 ? [urlStr substringToIndex:60] : urlStr];
+                    enumerate_cookies_for_url([enumLabel UTF8String]);
+
+                    NSString* diagJS = @"(function(){"
+                        "if(window.__maiDiag)return;"
+                        "window.__maiDiag=true;"
+                        // Log cookies when page loads
+                        "console.log('[MAI-DIAG] Page: '+location.href.substring(0,80));"
+                        "console.log('[MAI-DIAG] Cookies on load: '+document.cookie);"
+                        // TEST: Can JavaScript WRITE cookies?
+                        "try{"
+                            "document.cookie='MAI_TEST=1;path=/;secure;SameSite=None';"
+                            "var afterSet=document.cookie;"
+                            "console.log('[MAI-DIAG] After setting test cookie: '+afterSet);"
+                            "console.log('[MAI-DIAG] JS cookie write '+(afterSet.indexOf('MAI_TEST')>=0?'WORKS':'FAILED'));"
+                        "}catch(e){console.log('[MAI-DIAG] Cookie write error: '+e.message);}"
+                        // Log cookies at form submit time
+                        "document.addEventListener('submit',function(e){"
+                            "console.log('[MAI-DIAG] FORM SUBMIT to: '+(e.target.action||'').substring(0,120));"
+                            "console.log('[MAI-DIAG] Cookies at submit: '+document.cookie);"
+                            // Also log all form fields being submitted
+                            "var fd=new FormData(e.target);"
+                            "var fields=[];"
+                            "fd.forEach(function(v,k){fields.push(k+'='+(k.toLowerCase().indexOf('pass')>=0?'***':v.substring(0,30)))});"
+                            "console.log('[MAI-DIAG] Form fields: '+fields.join('; '));"
+                        "},true);"
+                        // Check if any global variable holds contextID
+                        "try{console.log('[MAI-DIAG] ServerData: '+(typeof ServerData!='undefined'?JSON.stringify(Object.keys(ServerData)):'undefined'));}catch(e){}"
+                        "try{console.log('[MAI-DIAG] $Config: '+(typeof $Config!='undefined'?JSON.stringify(Object.keys($Config).slice(0,20)):'undefined'));}catch(e){}"
+                        // Periodically log cookie changes (every 2s for 30s)
+                        "var count=0;"
+                        "var iv=setInterval(function(){"
+                            "console.log('[MAI-DIAG] Cookies['+count+']: '+document.cookie);"
+                            "if(++count>=15)clearInterval(iv);"
+                        "},2000);"
+                    "})();";
+                    cef_string_t dScript = cef_string_from_nsstring(diagJS);
+                    cef_string_t dUrl = cef_string_from_nsstring(@"about:blank");
+                    frame->execute_java_script(frame, &dScript, &dUrl, 0);
+                    cef_string_clear(&dScript);
+                    cef_string_clear(&dUrl);
+                    cef_log_to_file("Injected DIAGNOSTIC on %s",
+                                    [urlStr UTF8String]);
+                }
+
                 cef_string_userfree_free(frameUrl);
             }
             cef_release(&frame->base);
@@ -479,11 +726,27 @@ static void CEF_CALLBACK on_media_access_change(cef_display_handler_t* self,
           has_video_access, has_audio_access);
 }
 
+/// Capture console.log messages from JS — critical for [MAI] diagnostics
+static int CEF_CALLBACK on_console_message(cef_display_handler_t* self,
+                                            cef_browser_t* browser,
+                                            cef_log_severity_t level,
+                                            const cef_string_t* message,
+                                            const cef_string_t* source,
+                                            int line) {
+    if (!message) return 0;
+    NSString* msg = nsstring_from_cef_string(message);
+    if (!msg) return 0;
+    // Log ALL console messages for verbose debugging
+    cef_log_to_file("JS %s", [msg UTF8String]);
+    return 0; // Allow default handling
+}
+
 static void init_display_handler() {
     init_simple_ref(&g_displayHandler.base, sizeof(cef_display_handler_t));
     g_displayHandler.on_address_change = on_address_change;
     g_displayHandler.on_title_change = on_title_change;
     g_displayHandler.on_media_access_change = on_media_access_change;
+    g_displayHandler.on_console_message = on_console_message;
 }
 
 // MARK: - Permission Handler (Media Capture)
@@ -588,14 +851,13 @@ static void stopWindowCapture(void) {
     g_isCapturing = NO;
 }
 
-static void startWindowCapture(SCWindow* window) {
+static void startCaptureWithFilter(SCContentFilter* filter, NSString* label) {
     stopWindowCapture();
 
-    SCContentFilter* filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
     SCStreamConfiguration* config = [[SCStreamConfiguration alloc] init];
-    config.width = 1280;
-    config.height = 720;
-    config.minimumFrameInterval = CMTimeMake(1, 5); // 5 fps
+    config.width = 1920;
+    config.height = 1080;
+    config.minimumFrameInterval = CMTimeMake(1, 15); // 15 fps (matches Teams constraints)
     config.pixelFormat = kCVPixelFormatType_32BGRA;
     config.showsCursor = YES;
 
@@ -611,7 +873,7 @@ static void startWindowCapture(SCWindow* window) {
                    sampleHandlerQueue:dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0)
                                error:&error];
     if (error) {
-        cef_log_to_file("Window capture: Failed to add output: %s", [[error description] UTF8String]);
+        cef_log_to_file("Capture: Failed to add output: %s", [[error description] UTF8String]);
         g_captureStream = nil;
         return;
     }
@@ -619,13 +881,24 @@ static void startWindowCapture(SCWindow* window) {
     g_isCapturing = YES;
     [g_captureStream startCaptureWithCompletionHandler:^(NSError* startError) {
         if (startError) {
-            cef_log_to_file("Window capture: Failed to start: %s", [[startError description] UTF8String]);
+            cef_log_to_file("Capture: Failed to start: %s", [[startError description] UTF8String]);
             g_isCapturing = NO;
         } else {
-            cef_log_to_file("Window capture: Started successfully for '%s'",
-                            [window.title UTF8String]);
+            cef_log_to_file("Capture: Started successfully for '%s'", [label UTF8String]);
         }
     }];
+}
+
+static void startWindowCapture(SCWindow* window) {
+    SCContentFilter* filter = [[SCContentFilter alloc] initWithDesktopIndependentWindow:window];
+    startCaptureWithFilter(filter, window.title ?: @"Unknown window");
+}
+
+static void startDisplayCapture(SCDisplay* display) {
+    // Capture entire display excluding nothing
+    SCContentFilter* filter = [[SCContentFilter alloc]
+        initWithDisplay:display excludingWindows:@[]];
+    startCaptureWithFilter(filter, [NSString stringWithFormat:@"Display %u", display.displayID]);
 }
 
 @implementation MAICaptureOutput
@@ -692,8 +965,9 @@ static void startWindowCapture(SCWindow* window) {
 
 static cef_jsdialog_handler_t g_jsdialogHandler;
 
-// Store enumerated windows for lookup after user selection
+// Store enumerated sources for lookup after user selection
 static NSArray<SCWindow*>* g_enumeratedWindows = nil;
+static NSArray<SCDisplay*>* g_enumeratedDisplays = nil;
 
 static int CEF_CALLBACK on_jsdialog(
     cef_jsdialog_handler_t* self,
@@ -741,14 +1015,15 @@ static int CEF_CALLBACK on_jsdialog(
 
             // Add screens
             NSArray<SCDisplay*>* displays = content.displays;
+            g_enumeratedDisplays = [displays copy];
             if (displays.count == 1) {
                 [displayNames addObject:@"\xF0\x9F\x96\xA5 Entire screen"];
-                [sourceTypes addObject:@"S"];
+                [sourceTypes addObject:@"S:0"];
             } else {
                 for (NSUInteger i = 0; i < displays.count; i++) {
                     [displayNames addObject:[NSString stringWithFormat:
                         @"\xF0\x9F\x96\xA5 Screen %lu", (unsigned long)(i + 1)]];
-                    [sourceTypes addObject:@"S"];
+                    [sourceTypes addObject:[NSString stringWithFormat:@"S:%lu", (unsigned long)i]];
                 }
             }
 
@@ -801,20 +1076,32 @@ static int CEF_CALLBACK on_jsdialog(
                 NSInteger idx = popup.indexOfSelectedItem;
                 NSString* type = sourceTypes[idx];
 
-                if ([type isEqualToString:@"S"]) {
-                    // Screen selected → JS will call real getDisplayMedia (auto-select handles it)
-                    cef_log_to_file("Screen picker: User selected screen");
-                    cef_string_t result = cef_string_from_nsstring(@"SCREEN");
+                if ([type hasPrefix:@"S:"]) {
+                    // Screen selected → return Chromium source ID for getUserMedia
+                    // Format: "screen:DISPLAY_ID:0" (same as Electron desktopCapturer)
+                    NSInteger dispIdx = [[type substringFromIndex:2] integerValue];
+                    SCDisplay* selectedDisplay = g_enumeratedDisplays[dispIdx];
+                    NSString* sourceId = [NSString stringWithFormat:@"screen:%u:0",
+                                          selectedDisplay.displayID];
+                    cef_log_to_file("Screen picker: User selected display %u → %s",
+                                    selectedDisplay.displayID, [sourceId UTF8String]);
+                    // Also start SCStream capture as fallback if getUserMedia fails
+                    startDisplayCapture(selectedDisplay);
+                    cef_string_t result = cef_string_from_nsstring(sourceId);
                     callback->cont(callback, 1, &result);
                     cef_string_clear(&result);
                 } else if ([type hasPrefix:@"W:"]) {
-                    // Window selected → start native capture
+                    // Window selected → return Chromium source ID for getUserMedia
+                    // Format: "window:WINDOW_ID:0"
                     NSInteger winIdx = [[type substringFromIndex:2] integerValue];
                     SCWindow* selectedWindow = g_enumeratedWindows[winIdx];
-                    cef_log_to_file("Screen picker: User selected window '%s'",
-                                    [selectedWindow.title UTF8String]);
+                    NSString* sourceId = [NSString stringWithFormat:@"window:%u:0",
+                                          selectedWindow.windowID];
+                    cef_log_to_file("Screen picker: User selected window '%s' → %s",
+                                    [selectedWindow.title UTF8String], [sourceId UTF8String]);
+                    // Also start SCStream capture as fallback if getUserMedia fails
                     startWindowCapture(selectedWindow);
-                    cef_string_t result = cef_string_from_nsstring(@"WINDOW");
+                    cef_string_t result = cef_string_from_nsstring(sourceId);
                     callback->cont(callback, 1, &result);
                     cef_string_clear(&result);
                 }
@@ -825,6 +1112,7 @@ static int CEF_CALLBACK on_jsdialog(
             }
 
             g_enumeratedWindows = nil;
+            g_enumeratedDisplays = nil;
             cef_release(&callback->base);
         });
     }];
@@ -866,6 +1154,350 @@ static cef_permission_handler_t* CEF_CALLBACK get_permission_handler(cef_client_
     return &g_permissionHandler;
 }
 
+// MARK: - Cookie Access Filter (allow ALL cookies for Teams auth)
+
+static cef_cookie_access_filter_t g_cookieFilter;
+
+static int CEF_CALLBACK can_send_cookie(
+    cef_cookie_access_filter_t* self,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_request_t* request,
+    const cef_cookie_t* cookie) {
+    // Log cookies for Microsoft auth domains
+    if (cookie && cookie->name.str) {
+        NSString* domain = cookie->domain.str ? nsstring_from_cef_string(&cookie->domain) : @"";
+        if ([domain containsString:@"live.com"]) {
+            // Full details for login.live.com to debug contextID
+            NSString* name = nsstring_from_cef_string(&cookie->name);
+            NSString* value = cookie->value.str ? nsstring_from_cef_string(&cookie->value) : @"";
+            NSString* valPreview = [value length] > 80 ?
+                [NSString stringWithFormat:@"%@...(len=%lu)", [value substringToIndex:80], (unsigned long)[value length]] :
+                value;
+            cef_log_to_file("COOKIE-SEND: name=%s domain=%s httponly=%d secure=%d samesite=%d val=%s",
+                [name UTF8String], [domain UTF8String],
+                cookie->httponly, cookie->secure, (int)cookie->same_site,
+                [valPreview UTF8String]);
+        } else if ([domain containsString:@"microsoft"] ||
+                   [domain containsString:@"msftauth"] || [domain containsString:@"teams"]) {
+            NSString* name = nsstring_from_cef_string(&cookie->name);
+            cef_log_to_file("COOKIE-SEND: name=%s domain=%s", [name UTF8String], [domain UTF8String]);
+        }
+    }
+    return 1; // Allow all cookies to be sent
+}
+
+static int CEF_CALLBACK can_save_cookie(
+    cef_cookie_access_filter_t* self,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_request_t* request,
+    cef_response_t* response,
+    const cef_cookie_t* cookie) {
+    // Log ALL cookies for Microsoft auth domains with full details
+    if (cookie && cookie->name.str) {
+        NSString* domain = cookie->domain.str ? nsstring_from_cef_string(&cookie->domain) : @"";
+        if ([domain containsString:@"microsoft"] || [domain containsString:@"live.com"] ||
+            [domain containsString:@"msftauth"] || [domain containsString:@"teams"]) {
+            NSString* name = nsstring_from_cef_string(&cookie->name);
+            NSString* value = cookie->value.str ? nsstring_from_cef_string(&cookie->value) : @"";
+            NSString* path = cookie->path.str ? nsstring_from_cef_string(&cookie->path) : @"";
+            // Truncate value for log readability
+            NSString* valPreview = [value length] > 80 ?
+                [NSString stringWithFormat:@"%@...(len=%lu)", [value substringToIndex:80], (unsigned long)[value length]] :
+                value;
+            cef_log_to_file("COOKIE-SAVE: name=%s domain=%s path=%s httponly=%d secure=%d samesite=%d val=%s",
+                [name UTF8String], [domain UTF8String], [path UTF8String],
+                cookie->httponly, cookie->secure, (int)cookie->same_site,
+                [valPreview UTF8String]);
+        }
+    }
+    return 1; // Allow all cookies to be saved
+}
+
+static void init_cookie_access_filter() {
+    init_simple_ref(&g_cookieFilter.base, sizeof(cef_cookie_access_filter_t));
+    g_cookieFilter.can_send_cookie = can_send_cookie;
+    g_cookieFilter.can_save_cookie = can_save_cookie;
+}
+
+// MARK: - Resource Request Handler (provides cookie filter)
+
+static cef_resource_request_handler_t g_resourceRequestHandler;
+
+static cef_cookie_access_filter_t* CEF_CALLBACK get_cookie_access_filter(
+    cef_resource_request_handler_t* self,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_request_t* request) {
+    // DISABLED: Return NULL to use CEF's default cookie handling.
+    // Having a cookie filter in the path (even one that allows all cookies)
+    // may change CEF's internal cookie code path and cause issues with
+    // Microsoft's OAuth cookie test (co=0 on oauth20_authorize.srf).
+    return NULL;
+}
+
+// Log Set-Cookie headers from login.live.com responses
+static void log_set_cookie_headers(cef_response_t* response, const char* context) {
+    if (!response) return;
+
+    cef_string_multimap_t headerMap = cef_string_multimap_alloc();
+    response->get_header_map(response, headerMap);
+    size_t count = cef_string_multimap_size(headerMap);
+
+    for (size_t i = 0; i < count; i++) {
+        cef_string_t key = {};
+        cef_string_t val = {};
+        cef_string_multimap_key(headerMap, i, &key);
+        cef_string_multimap_value(headerMap, i, &val);
+
+        NSString* keyStr = key.str ? nsstring_from_cef_string(&key) : @"";
+        if ([keyStr.lowercaseString isEqualToString:@"set-cookie"]) {
+            NSString* valStr = val.str ? nsstring_from_cef_string(&val) : @"";
+            NSString* preview = [valStr length] > 200 ?
+                [NSString stringWithFormat:@"%@...(len=%lu)", [valStr substringToIndex:200], (unsigned long)[valStr length]] :
+                valStr;
+            cef_log_to_file("SET-COOKIE-HDR [%s]: %s", context, [preview UTF8String]);
+        }
+
+        cef_string_clear(&key);
+        cef_string_clear(&val);
+    }
+    cef_string_multimap_free(headerMap);
+}
+
+static int CEF_CALLBACK on_resource_response_cb(
+    cef_resource_request_handler_t* self,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_request_t* request,
+    cef_response_t* response) {
+
+    if (request && response) {
+        cef_string_userfree_t urlStr = request->get_url(request);
+        if (urlStr) {
+            NSString* url = nsstring_from_cef_string(urlStr);
+            if ([url containsString:@"login.live.com"]) {
+                int status = response->get_status(response);
+                NSString* urlPreview = [url length] > 100 ?
+                    [url substringToIndex:100] : url;
+                cef_log_to_file("RESPONSE: status=%d url=%s", status, [urlPreview UTF8String]);
+                log_set_cookie_headers(response, "response");
+
+                // After key responses, enumerate the cookie store
+                if ([url containsString:@"Me.htm"] || [url containsString:@"oauth20_authorize"]) {
+                    NSString* label = [NSString stringWithFormat:@"after-response:%@",
+                        [url containsString:@"Me.htm"] ? @"Me.htm" : @"oauth20_authorize"];
+                    enumerate_cookies_for_url([label UTF8String]);
+                }
+            }
+            cef_string_userfree_free(urlStr);
+        }
+    }
+    return 0; // Don't modify/retry the request
+}
+
+static void CEF_CALLBACK on_resource_redirect_cb(
+    cef_resource_request_handler_t* self,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_request_t* request,
+    cef_response_t* response,
+    cef_string_t* new_url) {
+
+    if (request && response && new_url) {
+        NSString* newUrlStr = new_url->str ? nsstring_from_cef_string(new_url) : @"";
+        if ([newUrlStr containsString:@"login.live.com"] ||
+            [newUrlStr containsString:@"login.microsoftonline.com"]) {
+
+            cef_string_userfree_t oldUrlStr = request->get_url(request);
+            NSString* oldUrl = oldUrlStr ? nsstring_from_cef_string(oldUrlStr) : @"";
+            NSString* oldPreview = [oldUrl length] > 80 ? [oldUrl substringToIndex:80] : oldUrl;
+            NSString* newPreview = [newUrlStr length] > 80 ? [newUrlStr substringToIndex:80] : newUrlStr;
+
+            int status = response->get_status(response);
+            cef_log_to_file("REDIRECT: %d from=%s to=%s", status, [oldPreview UTF8String], [newPreview UTF8String]);
+            log_set_cookie_headers(response, "redirect");
+
+            if (oldUrlStr) cef_string_userfree_free(oldUrlStr);
+        }
+    }
+}
+
+// on_before_resource_load: Ensures cookies are sent with login.live.com requests.
+// FIX: Chromium 145 sets DO_NOT_SEND_COOKIES (load_flag 0x80000) on form POST
+// navigations, which prevents the Cookie header from being sent with
+// ppsecure/post.srf. This causes Microsoft's contextID cookie validation to fail.
+// We force UR_FLAG_ALLOW_STORED_CREDENTIALS on all login.live.com requests
+// so that CEF maps credentials_mode = kInclude, overriding the load flag.
+static cef_return_value_t CEF_CALLBACK on_before_resource_load_cb(
+    cef_resource_request_handler_t* self,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_request_t* request,
+    cef_callback_t* callback) {
+
+    if (!request) return RV_CONTINUE;
+
+    cef_string_userfree_t urlStr = request->get_url(request);
+    if (!urlStr) return RV_CONTINUE;
+
+    NSString* url = nsstring_from_cef_string(urlStr);
+    cef_string_userfree_free(urlStr);
+
+    // Force cookie credentials on ALL Microsoft auth domain requests
+    if ([url containsString:@"login.live.com"] ||
+        [url containsString:@"login.microsoftonline.com"]) {
+
+        int flags = request->get_flags(request);
+        // UR_FLAG_ALLOW_STORED_CREDENTIALS = 1 << 3 = 8
+        // This tells CEF to set credentials_mode = kInclude, which overrides
+        // Chromium's DO_NOT_SEND_COOKIES load flag for this request.
+        if (!(flags & UR_FLAG_ALLOW_STORED_CREDENTIALS)) {
+            int newFlags = flags | UR_FLAG_ALLOW_STORED_CREDENTIALS;
+            request->set_flags(request, newFlags);
+
+            NSString* urlPreview = [url length] > 80 ? [url substringToIndex:80] : url;
+            cef_log_to_file("FIX-COOKIES: Forced UR_FLAG_ALLOW_STORED_CREDENTIALS on %s (flags 0x%x -> 0x%x)",
+                            [urlPreview UTF8String], flags, newFlags);
+        }
+
+        // Diagnostic: Log outgoing Cookie header
+        cef_string_multimap_t headerMap = cef_string_multimap_alloc();
+        request->get_header_map(request, headerMap);
+        size_t count = cef_string_multimap_size(headerMap);
+
+        BOOL foundCookie = NO;
+        for (size_t i = 0; i < count; i++) {
+            cef_string_t key = {};
+            cef_string_t val = {};
+            cef_string_multimap_key(headerMap, i, &key);
+            cef_string_multimap_value(headerMap, i, &val);
+
+            NSString* keyStr = key.str ? nsstring_from_cef_string(&key) : @"";
+            if ([keyStr.lowercaseString isEqualToString:@"cookie"]) {
+                foundCookie = YES;
+                NSString* valStr = val.str ? nsstring_from_cef_string(&val) : @"";
+                NSString* preview = [valStr length] > 300 ?
+                    [NSString stringWithFormat:@"%@...(len=%lu)", [valStr substringToIndex:300], (unsigned long)[valStr length]] :
+                    valStr;
+                NSString* urlPreview = [url length] > 100 ? [url substringToIndex:100] : url;
+                cef_log_to_file("OUTGOING-COOKIE [%s]: %s", [urlPreview UTF8String], [preview UTF8String]);
+            }
+
+            cef_string_clear(&key);
+            cef_string_clear(&val);
+        }
+
+        if (!foundCookie) {
+            NSString* urlPreview = [url length] > 100 ? [url substringToIndex:100] : url;
+            cef_log_to_file("OUTGOING-COOKIE [%s]: (pre-attach, cookies added by network layer)",
+                            [urlPreview UTF8String]);
+        }
+
+        cef_string_multimap_free(headerMap);
+    }
+
+    return RV_CONTINUE;
+}
+
+// Cookie visitor callback to enumerate cookies in the store
+static cef_cookie_visitor_t g_cookieVisitor;
+
+static int CEF_CALLBACK cookie_visitor_visit(
+    cef_cookie_visitor_t* self,
+    const cef_cookie_t* cookie,
+    int count,
+    int total,
+    int* deleteCookie) {
+
+    if (!cookie) return 1;
+
+    NSString* name = cookie->name.str ? nsstring_from_cef_string(&cookie->name) : @"?";
+    NSString* value = cookie->value.str ? nsstring_from_cef_string(&cookie->value) : @"";
+    NSString* domain = cookie->domain.str ? nsstring_from_cef_string(&cookie->domain) : @"?";
+    NSString* path = cookie->path.str ? nsstring_from_cef_string(&cookie->path) : @"/";
+
+    NSString* valPreview = [value length] > 80 ?
+        [NSString stringWithFormat:@"%@...", [value substringToIndex:80]] : value;
+
+    cef_log_to_file("COOKIE-STORE [%d/%d]: name=%s value=%s domain=%s path=%s httponly=%d secure=%d",
+                    count+1, total,
+                    [name UTF8String], [valPreview UTF8String],
+                    [domain UTF8String], [path UTF8String],
+                    cookie->httponly, cookie->secure);
+
+    *deleteCookie = 0;
+    return 1;  // Continue visiting
+}
+
+static void enumerate_cookies_for_url(const char* label) {
+    cef_request_context_t* ctx = cef_request_context_get_global_context();
+    if (!ctx) {
+        cef_log_to_file("COOKIE-ENUM [%s]: No global request context!", label);
+        return;
+    }
+
+    cef_cookie_manager_t* mgr = ctx->get_cookie_manager(ctx, NULL);
+    if (!mgr) {
+        cef_log_to_file("COOKIE-ENUM [%s]: No cookie manager!", label);
+        ctx->base.base.release(&ctx->base.base);
+        return;
+    }
+
+    cef_log_to_file("COOKIE-ENUM [%s]: Enumerating all cookies for login.live.com...", label);
+
+    // Visit cookies for login.live.com
+    init_simple_ref(&g_cookieVisitor.base, sizeof(cef_cookie_visitor_t));
+    g_cookieVisitor.visit = cookie_visitor_visit;
+
+    cef_string_t urlStr = cef_string_from_nsstring(@"https://login.live.com/");
+    int ok = mgr->visit_url_cookies(mgr, &urlStr, 1, &g_cookieVisitor);
+    cef_string_clear(&urlStr);
+
+    cef_log_to_file("COOKIE-ENUM [%s]: visit_url_cookies returned %d", label, ok);
+
+    mgr->base.release(&mgr->base);
+    ctx->base.base.release(&ctx->base.base);
+}
+
+static void init_resource_request_handler() {
+    init_simple_ref(&g_resourceRequestHandler.base,
+                    sizeof(cef_resource_request_handler_t));
+    g_resourceRequestHandler.get_cookie_access_filter = get_cookie_access_filter;
+    g_resourceRequestHandler.on_before_resource_load = on_before_resource_load_cb;
+    g_resourceRequestHandler.on_resource_response = on_resource_response_cb;
+    g_resourceRequestHandler.on_resource_redirect = on_resource_redirect_cb;
+}
+
+// MARK: - Request Handler (provides resource request handler)
+
+static cef_request_handler_t g_requestHandler;
+
+static cef_resource_request_handler_t* CEF_CALLBACK get_resource_request_handler_cb(
+    cef_request_handler_t* self,
+    cef_browser_t* browser,
+    cef_frame_t* frame,
+    cef_request_t* request,
+    int is_navigation,
+    int is_download,
+    const cef_string_t* request_initiator,
+    int* disable_default_handling) {
+    // Re-enabled for diagnostic cookie logging (filter still returns NULL)
+    simple_add_ref(&g_resourceRequestHandler.base);
+    return &g_resourceRequestHandler;
+}
+
+static void init_request_handler() {
+    init_simple_ref(&g_requestHandler.base, sizeof(cef_request_handler_t));
+    g_requestHandler.get_resource_request_handler = get_resource_request_handler_cb;
+}
+
+static cef_request_handler_t* CEF_CALLBACK get_request_handler(cef_client_t* self) {
+    simple_add_ref(&g_requestHandler.base);
+    return &g_requestHandler;
+}
+
 static void init_client() {
     init_simple_ref(&g_client.base, sizeof(cef_client_t));
     g_client.get_life_span_handler = get_life_span_handler;
@@ -873,7 +1505,14 @@ static void init_client() {
     g_client.get_display_handler = get_display_handler;
     g_client.get_permission_handler = get_permission_handler;
     g_client.get_jsdialog_handler = get_jsdialog_handler;
+    g_client.get_request_handler = get_request_handler;
 }
+
+// MARK: - Standalone Native Window for Teams
+// CEF Views framework is INCOMPATIBLE with external_message_pump=1 on macOS
+// because Views requires MessagePumpNSApplication (only created by CefRunMessageLoop).
+// Instead, we create a native NSWindow and embed an Alloy-style CEF browser in it.
+// getDisplayMedia uses our custom native picker (ScreenCaptureKit + JSDialog handler).
 
 // MARK: - Browser Process Handler
 // Required when using external_message_pump = 1.
@@ -884,6 +1523,10 @@ static cef_browser_process_handler_t g_browserProcessHandler;
 static void CEF_CALLBACK on_context_initialized(
     cef_browser_process_handler_t* self) {
     NSLog(@"[CEF] Context initialized - CEF is fully ready");
+    // NOTE: Cookie preferences are set AFTER cef_initialize() returns,
+    // not here. The global request context is not fully ready during
+    // this callback (called within cef_initialize), and accessing it
+    // causes SIGBUS crash (0xcdcdcdcd uninitialized memory).
 }
 
 static void CEF_CALLBACK on_before_child_process_launch(
@@ -912,7 +1555,7 @@ static void CEF_CALLBACK on_schedule_message_pump_work(
     if (delay_ms <= 0) {
         // Work needed ASAP - dispatch immediately to main thread
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (g_cefInitialized) {
+            if (g_cefInitialized && g_browser) {
                 cef_do_message_loop_work();
             }
         });
@@ -922,7 +1565,7 @@ static void CEF_CALLBACK on_schedule_message_pump_work(
             dispatch_time(DISPATCH_TIME_NOW, delay_ms * NSEC_PER_MSEC),
             dispatch_get_main_queue(),
             ^{
-                if (g_cefInitialized) {
+                if (g_cefInitialized && g_browser) {
                     cef_do_message_loop_work();
                 }
             });
@@ -948,52 +1591,96 @@ static void CEF_CALLBACK on_before_command_line_processing(
 
     if (!command_line) return;
 
-    // Auto-select "Entire screen" for screen sharing via getDisplayMedia().
-    // In embedded CEF mode, Chrome can't show its own picker UI.
-    // Our custom JS picker handles source selection; this flag ensures
-    // screen capture works when the user selects a screen option.
-    cef_string_t autoSelName = cef_string_from_nsstring(@"auto-select-desktop-capture-source");
-    cef_string_t autoSelVal = cef_string_from_nsstring(@"Entire screen");
-    command_line->append_switch_with_value(command_line, &autoSelName, &autoSelVal);
-    cef_string_clear(&autoSelName);
-    cef_string_clear(&autoSelVal);
+    // Log process type for debugging
+    NSString* procType = process_type ? nsstring_from_cef_string(process_type) : @"browser";
+    NSLog(@"[CEF] on_before_command_line_processing for: %@", procType);
 
-    // Enable ScreenCaptureKit (macOS 14+) for native system picker.
-    // The macOS system picker (SCContentSharingPicker) shows Screens, Windows, and Apps
-    // without requiring Chrome's Views-based DesktopMediaPickerViews dialog,
-    // which doesn't work properly in embedded non-Views CEF windows.
-    cef_string_t enableFeaturesName = cef_string_from_nsstring(@"enable-features");
-    cef_string_t enableFeaturesVal = cef_string_from_nsstring(
-        @"UseSCContentSharingPicker,ScreenCaptureKitStreamPickerSonoma,"
-        @"ScreenCaptureKitPickerScreen,ScreenCaptureKitMacScreen");
-    command_line->append_switch_with_value(command_line, &enableFeaturesName, &enableFeaturesVal);
-    cef_string_clear(&enableFeaturesName);
-    cef_string_clear(&enableFeaturesVal);
+    // Enable media stream APIs
+    cef_string_t mediaStream = cef_string_from_nsstring(@"enable-media-stream");
+    command_line->append_switch(command_line, &mediaStream);
+    cef_string_clear(&mediaStream);
+
+    // Enable getUserMedia screen capturing — allows getUserMedia() with
+    // chromeMediaSource:'desktop' + chromeMediaSourceId to create REAL desktop
+    // capture tracks (is_screencast=true). This is the Electron/teams-for-linux
+    // approach and produces proper video-content-type RTP headers (0x01).
+    cef_string_t screenCapFlag = cef_string_from_nsstring(@"enable-usermedia-screen-capturing");
+    command_line->append_switch(command_line, &screenCapFlag);
+    cef_string_clear(&screenCapFlag);
+
+    // Auto-accept camera/mic WITHOUT affecting screen capture.
+    // NOTE: --use-fake-ui-for-media-stream was removed because it causes
+    // NotReadableError for getDisplayMedia() in Alloy mode (CEF Forum #20150).
+    // Our on_request_media_access_permission + on_show_permission_prompt callbacks
+    // handle all permission grants.
+    cef_string_t autoAccept = cef_string_from_nsstring(@"auto-accept-camera-and-microphone-capture");
+    command_line->append_switch(command_line, &autoAccept);
+    cef_string_clear(&autoAccept);
 
     // Disable GPU sandbox for macOS compatibility
     cef_string_t flag4 = cef_string_from_nsstring(@"disable-gpu-sandbox");
     command_line->append_switch(command_line, &flag4);
     cef_string_clear(&flag4);
 
-    // Use mock keychain to avoid macOS Keychain password prompts
+    // Use mock keychain to avoid macOS Keychain access prompts.
+    // The cookie issue was NOT caused by mock-keychain — it was caused by
+    // Chromium's DO_NOT_SEND_COOKIES load flag on form POST navigations,
+    // which we fix via UR_FLAG_ALLOW_STORED_CREDENTIALS in on_before_resource_load.
     cef_string_t flag5 = cef_string_from_nsstring(@"use-mock-keychain");
     command_line->append_switch(command_line, &flag5);
     cef_string_clear(&flag5);
 
-    // Disable Chrome-specific features that can crash in embedded CEF context
-    cef_string_t flag6name = cef_string_from_nsstring(@"disable-features");
-    cef_string_t flag6val = cef_string_from_nsstring(
-        @"MediaRouter,PwaNavigationCapturing,WebAppInstallation,"
-        @"WebAppSystemMediaControls,DesktopPWAsAdditionalWindowingControls,"
-        @"ChromeWebAppShortcutCopier,BackForwardCache");
-    command_line->append_switch_with_value(command_line, &flag6name, &flag6val);
-    cef_string_clear(&flag6name);
-    cef_string_clear(&flag6val);
+    // Disable Chrome-specific features that crash or are unneeded in embedded CEF.
+    // NOTE: Cookie/SameSite/ThirdParty flags were REMOVED — teams-for-linux
+    // (Electron) works without disabling any of these, and disabling them
+    // was causing oauth20_authorize.srf to reset MSPRequ co=0 (cookie test fail).
+    // Chromium's default cookie behavior is what Microsoft's auth servers expect.
+    {
+        cef_string_t dfKey = cef_string_from_nsstring(@"disable-features");
+
+        // Only disable Chrome UI/PWA features that crash or are unneeded
+        NSString* features =
+            @"MediaRouter,PwaNavigationCapturing,WebAppInstallation,"
+            @"WebAppSystemMediaControls,DesktopPWAsAdditionalWindowingControls,"
+            @"ChromeWebAppShortcutCopier,BackForwardCache";
+
+        NSLog(@"[CEF] Adding disable-features: %@", features);
+        cef_string_t dfVal = cef_string_from_nsstring(features);
+        command_line->append_switch_with_value(command_line, &dfKey, &dfVal);
+        cef_string_clear(&dfKey);
+        cef_string_clear(&dfVal);
+    }
 
     // Disable extensions (not needed for video conferencing)
     cef_string_t flag7 = cef_string_from_nsstring(@"disable-extensions");
     command_line->append_switch(command_line, &flag7);
     cef_string_clear(&flag7);
+
+    // NOTE: --disable-site-isolation-trials was REMOVED.
+    // Chromium's cookie engine is designed for site-isolated processes.
+    // Disabling site isolation can cause cross-origin cookie issues.
+
+    // Whitelist Microsoft auth servers for integrated auth
+    cef_string_t authKey = cef_string_from_nsstring(@"auth-server-whitelist");
+    cef_string_t authVal = cef_string_from_nsstring(@"*.microsoft.com,*.microsoftonline.com,*.live.com");
+    command_line->append_switch_with_value(command_line, &authKey, &authVal);
+    cef_string_clear(&authKey);
+    cef_string_clear(&authVal);
+
+    // Net-log for screen sharing diagnostics
+    cef_string_t netLogKey = cef_string_from_nsstring(@"log-net-log");
+    cef_string_t netLogVal = cef_string_from_nsstring(@"/tmp/cef_netlog.json");
+    command_line->append_switch_with_value(command_line, &netLogKey, &netLogVal);
+    cef_string_clear(&netLogKey);
+    cef_string_clear(&netLogVal);
+    cef_string_t netLogCapKey = cef_string_from_nsstring(@"net-log-capture-mode");
+    cef_string_t netLogCapVal = cef_string_from_nsstring(@"IncludeSensitive");
+    command_line->append_switch_with_value(command_line, &netLogCapKey, &netLogCapVal);
+    cef_string_clear(&netLogCapKey);
+    cef_string_clear(&netLogCapVal);
+
+    // NOTE: --auto-select-desktop-capture-source removed — it is Chrome-layer
+    // only and has NO effect in Alloy mode (CEF Issue #3667).
 
     // Log the full command line for debugging
     cef_string_userfree_t fullCmd = command_line->get_command_line_string(command_line);
@@ -1029,7 +1716,7 @@ static void startMessagePump() {
     g_messagePumpTimer = [NSTimer scheduledTimerWithTimeInterval:1.0/30.0
                                                          repeats:YES
                                                            block:^(NSTimer* timer) {
-        if (g_cefInitialized) {
+        if (g_cefInitialized && g_browser) {
             cef_do_message_loop_work();
         }
     }];
@@ -1095,6 +1782,9 @@ static void stopMessagePump() {
     init_display_handler();
     init_permission_handler();
     init_jsdialog_handler();
+    init_cookie_access_filter();
+    init_resource_request_handler();
+    init_request_handler();
     init_client();
     init_browser_process_handler();
     init_app();
@@ -1106,6 +1796,7 @@ static void stopMessagePump() {
     settings.external_message_pump = 1;  // We drive the message pump via NSTimer
     settings.multi_threaded_message_loop = 0;
     settings.windowless_rendering_enabled = 0;
+    settings.persist_session_cookies = 1;  // Keep session cookies across restarts
 
     // Set log severity to INFO for debugging screen capture
     settings.log_severity = LOGSEVERITY_INFO;
@@ -1139,20 +1830,30 @@ static void stopMessagePump() {
     cef_string_set(bsPath.str, bsPath.length, &settings.browser_subprocess_path, 1);
     cef_string_clear(&bsPath);
 
-    // Cache path
-    NSString* cachePath = [NSTemporaryDirectory() stringByAppendingPathComponent:@"MAI_CEF_Cache"];
-    [[NSFileManager defaultManager] createDirectoryAtPath:cachePath
+    // Cache paths — persistent location so cookies/sessions survive app restarts
+    NSArray* appSupport = NSSearchPathForDirectoriesInDomains(
+        NSApplicationSupportDirectory, NSUserDomainMask, YES);
+    NSString* rootCachePath = [[appSupport firstObject] stringByAppendingPathComponent:@"MAI/CEF"];
+    NSString* profilePath = [rootCachePath stringByAppendingPathComponent:@"Default"];
+    [[NSFileManager defaultManager] createDirectoryAtPath:profilePath
                               withIntermediateDirectories:YES
                                                attributes:nil
                                                     error:nil];
-    cef_string_t cPath = cef_string_from_nsstring(cachePath);
-    cef_string_set(cPath.str, cPath.length, &settings.root_cache_path, 1);
-    cef_string_clear(&cPath);
+    cef_string_t rcPath = cef_string_from_nsstring(rootCachePath);
+    cef_string_set(rcPath.str, rcPath.length, &settings.root_cache_path, 1);
+    cef_string_clear(&rcPath);
+    // cache_path must be set for persistent cookie storage (not just root_cache_path)
+    cef_string_t cpPath = cef_string_from_nsstring(profilePath);
+    cef_string_set(cpPath.str, cpPath.length, &settings.cache_path, 1);
+    cef_string_clear(&cpPath);
 
-    // User agent (Chrome-like for maximum compatibility)
+    // User agent — plain Chrome with REAL version number (145.0.7632.68).
+    // Chrome/145.0.0.0 is non-standard and Microsoft servers fingerprint the UA
+    // to adjust the auth flow. Must match the actual Chromium version in CEF.
+    // Edge UA was removed because it triggers BSSO checks that fail in CEF.
     NSString* userAgent = @"Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                           @"AppleWebKit/537.36 (KHTML, like Gecko) "
-                          @"Chrome/145.0.0.0 Safari/537.36";
+                          @"Chrome/145.0.7632.68 Safari/537.36";
     cef_string_t ua = cef_string_from_nsstring(userAgent);
     cef_string_set(ua.str, ua.length, &settings.user_agent, 1);
     cef_string_clear(&ua);
@@ -1181,6 +1882,12 @@ static void stopMessagePump() {
         g_cefInitialized = YES;
         startMessagePump();
         NSLog(@"[CEF] Initialization successful");
+        // Cookie preferences handled via command-line flags:
+        // --disable-features includes ThirdPartyCookiePhaseout,
+        // ThirdPartyStoragePartitioning, PartitionedCookies
+        // plus persist_session_cookies=1 in CEF settings.
+        // Programmatic set_preference crashes due to CEF C API
+        // ownership semantics (use-after-free on cef_value_t).
     } else {
         NSLog(@"[CEF] ERROR: Initialization failed (code: %d)", cef_get_exit_code());
     }
@@ -1198,6 +1905,12 @@ static void stopMessagePump() {
 
     // Close browser first
     [self closeBrowser];
+
+    // Pump remaining messages to let browser close complete
+    for (int i = 0; i < 100 && g_browser != NULL; i++) {
+        cef_do_message_loop_work();
+        usleep(10000);
+    }
 
     // Stop message pump
     stopMessagePump();
@@ -1238,10 +1951,8 @@ static void stopMessagePump() {
     windowInfo.bounds.y = (int)frame.origin.y;
     windowInfo.bounds.width = (int)frame.size.width;
     windowInfo.bounds.height = (int)frame.size.height;
-    // Use Chrome runtime style - required for getDisplayMedia() screen sharing.
-    // Alloy style lacks the DesktopMediaPicker, so getDisplayMedia() fails silently.
-    // Chrome style provides the built-in desktop media picker UI.
-    // With parent_view set, Chrome renders content-only (no address bar/tabs).
+    // NOTE: parent_view on macOS FORCES Alloy style regardless of runtime_style.
+    // getDisplayMedia screen sharing uses our ScreenCaptureKit → Canvas pipeline.
     windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
 
     // Browser settings
@@ -1271,6 +1982,8 @@ static void stopMessagePump() {
 
     if (g_browser) {
         g_browserView = hostView;
+        // Restart message pump if it was stopped (e.g., after previous browser close)
+        startMessagePump();
         NSLog(@"[CEF] Browser created successfully");
     } else {
         NSLog(@"[CEF] ERROR: Failed to create browser");
@@ -1278,6 +1991,86 @@ static void stopMessagePump() {
     }
 
     return hostView;
+}
+
++ (void)openStandaloneBrowserWithURL:(NSString *)url {
+    if (!g_cefInitialized) {
+        if (![self initializeCEF]) {
+            NSLog(@"[CEF] ERROR: Cannot open standalone browser - CEF init failed");
+            return;
+        }
+    }
+
+    // Close existing browser if any
+    if (g_browser) {
+        [self closeBrowser];
+    }
+
+    NSLog(@"[CEF] Creating standalone NSWindow browser for: %@", url);
+    g_isStandaloneMode = YES;
+
+    // Create native NSWindow
+    NSWindow* window = [[NSWindow alloc]
+        initWithContentRect:NSMakeRect(100, 100, 1280, 800)
+                  styleMask:(NSWindowStyleMaskTitled |
+                             NSWindowStyleMaskClosable |
+                             NSWindowStyleMaskResizable |
+                             NSWindowStyleMaskMiniaturizable)
+                    backing:NSBackingStoreBuffered
+                      defer:NO];
+    [window setTitle:@"MAI - Teams"];
+    [window setReleasedWhenClosed:NO];
+
+    NSView* contentView = window.contentView;
+    contentView.wantsLayer = YES;
+
+    // Window info — embed CEF in the native NSWindow's content view.
+    // parent_view forces Alloy style on macOS (per cef_types_mac.h).
+    // getDisplayMedia is handled by our native picker (JSDialog + ScreenCaptureKit).
+    cef_window_info_t windowInfo = {};
+    windowInfo.size = sizeof(cef_window_info_t);
+    windowInfo.parent_view = (__bridge void*)contentView;
+    windowInfo.bounds.x = 0;
+    windowInfo.bounds.y = 0;
+    windowInfo.bounds.width = (int)contentView.bounds.size.width;
+    windowInfo.bounds.height = (int)contentView.bounds.size.height;
+    windowInfo.runtime_style = CEF_RUNTIME_STYLE_DEFAULT;
+
+    // Browser settings
+    cef_browser_settings_t browserSettings = {};
+    browserSettings.size = sizeof(cef_browser_settings_t);
+    browserSettings.webgl = STATE_ENABLED;
+
+    // URL
+    cef_string_t cefURL = cef_string_from_nsstring(url);
+
+    // Add ref to client before passing
+    simple_add_ref(&g_client.base);
+
+    // Create browser synchronously — embedded in native NSWindow
+    g_browser = cef_browser_host_create_browser_sync(
+        &windowInfo,
+        &g_client,
+        &cefURL,
+        &browserSettings,
+        NULL,  // extra_info
+        NULL   // request_context (use default)
+    );
+
+    cef_string_clear(&cefURL);
+
+    if (g_browser) {
+        g_standaloneNSWindow = window;
+        g_browserView = contentView;
+        startMessagePump();
+        [window makeKeyAndOrderFront:nil];
+        [window center];
+        NSLog(@"[CEF] Standalone NSWindow browser created successfully");
+    } else {
+        NSLog(@"[CEF] ERROR: Failed to create standalone browser");
+        g_isStandaloneMode = NO;
+        window = nil;
+    }
 }
 
 + (void)loadURL:(NSString *)url {
@@ -1295,7 +2088,10 @@ static void stopMessagePump() {
 + (void)closeBrowser {
     if (!g_browser) return;
 
-    NSLog(@"[CEF] Closing browser");
+    NSLog(@"[CEF] Closing browser (standalone=%d)", g_isStandaloneMode);
+
+    // Stop any active window capture before closing
+    stopWindowCapture();
 
     cef_browser_host_t* host = g_browser->get_host(g_browser);
     if (host) {
@@ -1303,7 +2099,107 @@ static void stopMessagePump() {
         cef_release(&host->base);
     }
 
-    // Browser will be set to NULL in on_before_close callback
+    // Browser will be set to NULL in on_before_close callback.
+    // Standalone NSWindow is closed in on_before_close too.
+}
+
++ (void)safeCloseBrowser {
+    if (!g_browser) return;
+
+    NSLog(@"[CEF] Safe-closing browser (synchronous)");
+
+    stopWindowCapture();
+
+    // Stop the 30Hz timer FIRST to prevent async cef_do_message_loop_work calls.
+    // We'll manually pump messages in a controlled loop below.
+    stopMessagePump();
+
+    // Initiate the close
+    cef_browser_host_t* host = g_browser->get_host(g_browser);
+    if (host) {
+        host->close_browser(host, 1); // force_close = true
+        cef_release(&host->base);
+    }
+
+    // Manually pump CEF messages until on_before_close sets g_browser = NULL.
+    // This lets CEF process the close sequence (IPC with renderer, cleanup)
+    // without the 30Hz timer interfering.
+    NSLog(@"[CEF] Pumping messages for close sequence...");
+    for (int i = 0; i < 300 && g_browser != NULL; i++) {
+        cef_do_message_loop_work();
+        // Brief sleep to allow IPC processing
+        usleep(10000); // 10ms
+    }
+
+    if (g_browser == NULL) {
+        NSLog(@"[CEF] Browser closed cleanly via on_before_close");
+    } else {
+        // Timeout — force release as fallback
+        NSLog(@"[CEF] Close timed out after 3s, force-releasing");
+        cef_browser_t* b = g_browser;
+        g_browser = NULL;
+        g_browserView = nil;
+        cef_release(&b->base);
+    }
+}
+
++ (void)forceReleaseBrowser {
+    if (!g_browser) return;
+
+    NSLog(@"[CEF] Force-releasing browser (standalone=%d)", g_isStandaloneMode);
+
+    // Stop capture and message pump FIRST to prevent any further CEF callbacks
+    stopWindowCapture();
+    stopMessagePump();
+
+    // CRITICAL: Set g_browser to NULL BEFORE any view manipulation.
+    cef_browser_t* browserToRelease = g_browser;
+    g_browser = NULL;
+
+    NSView* viewToClean = g_browserView;
+    g_browserView = nil;
+    if (viewToClean) {
+        for (NSView* subview in [viewToClean.subviews copy]) {
+            [subview removeFromSuperview];
+        }
+    }
+
+    // Close standalone NSWindow if present
+    if (g_isStandaloneMode && g_standaloneNSWindow) {
+        [g_standaloneNSWindow close];
+        g_standaloneNSWindow = nil;
+        g_isStandaloneMode = NO;
+    }
+
+    // Release browser reference LAST
+    if (browserToRelease) {
+        cef_release(&browserToRelease->base);
+    }
+
+    NSLog(@"[CEF] Browser force-released");
+
+    // Notify delegate
+    dispatch_async(dispatch_get_main_queue(), ^{
+        id<CEFBridgeDelegate> delegate = g_delegate;
+        if ([delegate respondsToSelector:@selector(cefBrowserDidClose)]) {
+            [delegate cefBrowserDidClose];
+        }
+    });
+}
+
++ (void)killHelperProcesses {
+    // Find and kill MAI Helper processes spawned by CEF.
+    // These are GPU, Renderer, Network, and Storage subprocesses.
+    NSTask* task = [[NSTask alloc] init];
+    task.launchPath = @"/usr/bin/pkill";
+    task.arguments = @[@"-f", @"MAI Helper"];
+    @try {
+        [task launch];
+        [task waitUntilExit];
+        NSLog(@"[CEF] Helper processes terminated (pkill exit code: %d)", task.terminationStatus);
+    } @catch (NSException* e) {
+        NSLog(@"[CEF] Failed to kill helper processes: %@", e);
+    }
 }
 
 + (void)executeJavaScript:(NSString *)script {

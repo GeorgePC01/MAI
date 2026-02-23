@@ -40,12 +40,18 @@ NS_ASSUME_NONNULL_BEGIN
 /// Shutdown CEF subsystem and release all resources
 + (void)shutdownCEF;
 
-/// Create a new Chromium browser view for embedding in SwiftUI
+/// Create a new Chromium browser view for embedding in SwiftUI (Alloy style)
 /// @param url Initial URL to load
 /// @param frame Initial frame for the view
 /// @return NSView containing the Chromium browser, or nil on failure
 + (nullable NSView *)createBrowserViewWithURL:(NSString *)url
                                         frame:(NSRect)frame;
+
+/// Open a standalone Chrome-style browser window (Views framework).
+/// Used for Teams where native getDisplayMedia() screen picker is required.
+/// Creates its own top-level window — NOT embedded in SwiftUI.
+/// @param url Initial URL to load
++ (void)openStandaloneBrowserWithURL:(NSString *)url;
 
 /// Navigate the active CEF browser to a new URL
 /// @param url The URL to navigate to
@@ -53,6 +59,19 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Close the active CEF browser and release its resources
 + (void)closeBrowser;
+
+/// Safely close the browser synchronously: stops the timer, calls close_browser,
+/// then manually pumps CEF messages until the close completes (up to 3s timeout).
+/// This avoids the crash caused by the 30Hz timer firing during window focus changes.
++ (void)safeCloseBrowser;
+
+/// Force-release the CEF browser without going through CEF's close sequence.
+/// Stops the message pump and releases resources immediately.
+/// Also kills helper processes after 1s to free RAM.
++ (void)forceReleaseBrowser;
+
+/// Kill all MAI Helper child processes (GPU, Renderer, Network, Storage)
++ (void)killHelperProcesses;
 
 /// Execute JavaScript in the active CEF browser
 /// @param script JavaScript code to execute
