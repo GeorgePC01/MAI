@@ -19,6 +19,11 @@ struct WebViewContainer: View {
                         SuspendedTabView(tab: tab)
                             .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
                             .allowsHitTesting(tab.id == browserState.currentTab?.id)
+                    } else if tab.isIncognito && (tab.url == "about:blank" || tab.url.isEmpty) {
+                        // Tab incógnito en página inicial: mostrar landing page
+                        IncognitoLandingPage()
+                            .opacity(tab.id == browserState.currentTab?.id ? 1 : 0)
+                            .allowsHitTesting(tab.id == browserState.currentTab?.id)
                     } else if tab.useChromiumEngine {
                         // Tab de videoconferencia: usar Chromium (CEF)
                         CEFWebView(url: tab.url, tab: tab, browserState: browserState)
@@ -132,20 +137,25 @@ class OAuthWindowController: NSWindowController, WKNavigationDelegate {
 class WebViewConfigurationManager {
     static let shared = WebViewConfigurationManager()
 
-    /// Data store persistente compartido entre todas las tabs
+    /// Data store persistente compartido entre todas las tabs normales
     let dataStore: WKWebsiteDataStore
+
+    /// Data store no-persistente compartido entre tabs incógnito
+    /// (cookies se comparten entre tabs incógnito pero se borran al cerrar)
+    let incognitoDataStore: WKWebsiteDataStore
 
     private init() {
         // Usar el data store por defecto que persiste cookies y sesiones
         self.dataStore = WKWebsiteDataStore.default()
+        self.incognitoDataStore = WKWebsiteDataStore.nonPersistent()
     }
 
     /// Crea una configuración para una nueva WebView
-    func createConfiguration() -> WKWebViewConfiguration {
+    func createConfiguration(isIncognito: Bool = false) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
 
-        // CRÍTICO: Usar data store persistente para cookies/sesiones OAuth
-        config.websiteDataStore = dataStore
+        // Incógnito: no persiste cookies, cache ni local storage
+        config.websiteDataStore = isIncognito ? incognitoDataStore : dataStore
 
         // Identificarse como Safari en la configuración
         config.applicationNameForUserAgent = "Version/18.2 Safari/605.1.15"
@@ -234,8 +244,8 @@ struct WebViewRepresentable: NSViewRepresentable {
     @ObservedObject var browserState: BrowserState
 
     func makeNSView(context: Context) -> WKWebView {
-        // Usar configuración compartida para persistir cookies y sesiones OAuth
-        let config = WebViewConfigurationManager.shared.createConfiguration()
+        // Usar configuración compartida (incógnito usa data store no-persistente)
+        let config = WebViewConfigurationManager.shared.createConfiguration(isIncognito: tab.isIncognito)
 
         // Crear WebView con configuración compartida
         let webView = WKWebView(frame: .zero, configuration: config)
@@ -372,8 +382,9 @@ struct WebViewRepresentable: NSViewRepresentable {
 
             tab.updateFromWebView(webView)
 
-            // No registrar SafeLinks ni about:blank en historial
-            if let url = webView.url?.absoluteString,
+            // No registrar en historial: incógnito, SafeLinks, about:blank
+            if !tab.isIncognito,
+               let url = webView.url?.absoluteString,
                !url.contains("safelinks.protection.outlook.com"),
                url != "about:blank" {
                 HistoryManager.shared.recordVisit(
@@ -871,6 +882,169 @@ struct WebViewRepresentable: NSViewRepresentable {
                 }
             }.resume()
         }
+    }
+}
+
+/// Página de inicio para ventanas incógnito
+struct IncognitoLandingPage: View {
+    @EnvironmentObject var browserState: BrowserState
+
+    private let bgColor = Color(red: 0.10, green: 0.10, blue: 0.12)
+    private let cardColor = Color.white.opacity(0.05)
+    private let textPrimary = Color.white
+    private let textSecondary = Color(red: 0.65, green: 0.68, blue: 0.73)
+    private let textTertiary = Color(red: 0.55, green: 0.58, blue: 0.63)
+    private let accentGreen = Color(red: 0.34, green: 0.80, blue: 0.54)
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 0) {
+                Spacer().frame(height: 60)
+
+                // Icono principal
+                Image(systemName: "eye.slash.fill")
+                    .font(.system(size: 48))
+                    .foregroundColor(textSecondary)
+                    .padding(.bottom, 16)
+
+                // Título
+                Text("Estás en modo Incógnito")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundColor(textPrimary)
+                    .padding(.bottom, 12)
+
+                // Descripción principal
+                Text("Las demás personas que usen este dispositivo no verán tu actividad, por lo que puedes navegar de forma más privada. Esto no cambiará la forma en que recopilan los datos los sitios web que visitas ni los servicios que usan.")
+                    .font(.system(size: 13))
+                    .foregroundColor(textSecondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 560)
+                    .padding(.bottom, 32)
+
+                // Dos columnas de info
+                HStack(alignment: .top, spacing: 24) {
+                    // Columna izquierda: Lo que NO se guarda
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("MAI no guardará:", systemImage: "checkmark.shield.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(textPrimary)
+
+                        IncognitoInfoRow(icon: "clock.arrow.circlepath", text: "El historial de navegación")
+                        IncognitoInfoRow(icon: "server.rack", text: "Las cookies y datos de sitios")
+                        IncognitoInfoRow(icon: "rectangle.and.pencil.and.ellipsis", text: "La información que ingreses en formularios")
+                        IncognitoInfoRow(icon: "magnifyingglass", text: "Las búsquedas realizadas")
+                    }
+                    .padding(16)
+                    .frame(maxWidth: 280, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(cardColor))
+
+                    // Columna derecha: Lo que SÍ puede ser visible
+                    VStack(alignment: .leading, spacing: 12) {
+                        Label("Tu actividad podría ser visible para:", systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(textPrimary)
+
+                        IncognitoInfoRow(icon: "globe", text: "Los sitios web que visitas")
+                        IncognitoInfoRow(icon: "building.2", text: "Tu empleador o institución educativa")
+                        IncognitoInfoRow(icon: "wifi", text: "Tu proveedor de servicios de Internet")
+                    }
+                    .padding(16)
+                    .frame(maxWidth: 280, alignment: .leading)
+                    .background(RoundedRectangle(cornerRadius: 12).fill(cardColor))
+                }
+                .padding(.bottom, 24)
+
+                // Card: Protección activa de MAI
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "shield.checkered")
+                            .font(.system(size: 16))
+                            .foregroundColor(accentGreen)
+                        Text("Protección activa de MAI")
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(textPrimary)
+                    }
+
+                    Text("MAI bloquea automáticamente trackers, anuncios y cookies de terceros incluso en modo normal. En modo incógnito, además se borran todos los datos de la sesión al cerrar esta ventana.")
+                        .font(.system(size: 12))
+                        .foregroundColor(textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+
+                    Divider().background(Color.white.opacity(0.1))
+
+                    HStack(spacing: 20) {
+                        IncognitoFeatureBadge(icon: "xmark.shield.fill", text: "Trackers bloqueados", color: accentGreen)
+                        IncognitoFeatureBadge(icon: "nosign", text: "Ads bloqueados", color: accentGreen)
+                        IncognitoFeatureBadge(icon: "circle.slash", text: "Cookies de terceros bloqueadas", color: accentGreen)
+                        IncognitoFeatureBadge(icon: "fingerprint", text: "Anti-fingerprinting", color: accentGreen)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: 584)
+                .background(RoundedRectangle(cornerRadius: 12).fill(cardColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .strokeBorder(accentGreen.opacity(0.3), lineWidth: 1)
+                )
+                .padding(.bottom, 24)
+
+                // Nota sobre descargas y favoritos
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.circle.fill")
+                        .foregroundColor(textTertiary)
+                    Text("Se guardarán las descargas y los favoritos.")
+                        .font(.system(size: 12))
+                        .foregroundColor(textTertiary)
+                }
+                .padding(.horizontal, 20)
+                .padding(.vertical, 10)
+                .background(RoundedRectangle(cornerRadius: 8).fill(cardColor))
+
+                Spacer().frame(height: 60)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.horizontal, 40)
+        }
+        .background(bgColor)
+    }
+}
+
+/// Fila de información para la landing page incógnito
+struct IncognitoInfoRow: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 12))
+                .foregroundColor(Color(red: 0.55, green: 0.58, blue: 0.63))
+                .frame(width: 16)
+            Text(text)
+                .font(.system(size: 13))
+                .foregroundColor(Color(red: 0.75, green: 0.77, blue: 0.82))
+        }
+    }
+}
+
+/// Badge de feature activa para la landing page incógnito
+struct IncognitoFeatureBadge: View {
+    let icon: String
+    let text: String
+    let color: Color
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 16))
+                .foregroundColor(color)
+            Text(text)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(Color(red: 0.70, green: 0.73, blue: 0.78))
+                .multilineTextAlignment(.center)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity)
     }
 }
 

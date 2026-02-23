@@ -32,7 +32,9 @@ struct AddressBar: View {
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.textBackgroundColor))
+                    .fill(browserState.isIncognito
+                          ? Color(red: 0.20, green: 0.21, blue: 0.24)
+                          : Color(NSColor.textBackgroundColor))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(isEditing ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: isEditing ? 2 : 1)
@@ -55,7 +57,10 @@ struct AddressBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(browserState.isIncognito
+                    ? Color(red: 0.10, green: 0.10, blue: 0.12)
+                    : Color(NSColor.windowBackgroundColor))
+        .colorScheme(browserState.isIncognito ? .dark : .light)
         .onChange(of: browserState.currentURL) { newURL in
             if !isEditing {
                 urlText = newURL

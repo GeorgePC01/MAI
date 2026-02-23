@@ -26,6 +26,21 @@ struct BrowserView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            // Indicador de modo incógnito
+            if browserState.isIncognito {
+                HStack(spacing: 6) {
+                    Image(systemName: "eye.slash.fill")
+                        .font(.system(size: 11))
+                    Text("Navegación Incógnita")
+                        .font(.system(size: 11, weight: .medium))
+                }
+                .foregroundColor(.secondary)
+                .padding(.vertical, 4)
+                .frame(maxWidth: .infinity)
+                .background(Color(red: 0.14, green: 0.14, blue: 0.16))
+                .colorScheme(.dark)
+            }
+
             // Indicador de motor Chromium (cuando el tab usa CEF)
             if browserState.isCurrentTabChromium {
                 ChromiumEngineIndicator()
@@ -48,7 +63,9 @@ struct BrowserView: View {
             // Barra de estado
             StatusBar()
         }
-        .background(Color(NSColor.windowBackgroundColor))
+        .background(browserState.isIncognito
+                    ? Color(red: 0.10, green: 0.10, blue: 0.12)
+                    : Color(NSColor.windowBackgroundColor))
         .onTapGesture {
             // Activar la aplicación cuando se hace clic en la ventana
             NSApplication.shared.activate(ignoringOtherApps: true)
@@ -343,7 +360,10 @@ struct StatusBar: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 4)
-        .background(Color(NSColor.controlBackgroundColor))
+        .background(browserState.isIncognito
+                    ? Color(red: 0.10, green: 0.10, blue: 0.12)
+                    : Color(NSColor.controlBackgroundColor))
+        .colorScheme(browserState.isIncognito ? .dark : .light)
     }
 }
 
