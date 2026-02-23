@@ -151,23 +151,15 @@ class BrowserState: ObservableObject {
         }
 
         if shouldUseChromium {
-            let isTeams = Self.isTeamsDomain(for: finalURL)
-
             // CEF is a singleton — only one Chromium browser at a time.
             // If another tab already uses Chromium, reuse it.
+            // All video conferencing (Meet/Zoom/Teams) uses embedded Alloy mode.
+            // Standalone mode removed — parent_view forces Alloy anyway, and
+            // a separate window breaks Microsoft auth cookie flow.
             if let existingCEFTab = tabs.first(where: { $0.useChromiumEngine }),
                let cefIndex = tabs.firstIndex(where: { $0.id == existingCEFTab.id }) {
-                // If switching between Teams and non-Teams, close old browser first
-                if existingCEFTab.useStandaloneChromium != isTeams {
-                    CEFBridge.closeBrowser()
-                    existingCEFTab.useStandaloneChromium = isTeams
-                }
-                print("🔄 Reusing existing Chromium tab for: \(finalURL) (standalone=\(isTeams))")
-                if isTeams {
-                    CEFBridge.openStandaloneBrowser(withURL: finalURL)
-                } else {
-                    CEFBridge.loadURL(finalURL)
-                }
+                print("🔄 Reusing existing Chromium tab for: \(finalURL)")
+                CEFBridge.loadURL(finalURL)
                 existingCEFTab.url = finalURL
                 existingCEFTab.title = "Loading..."
                 currentTabIndex = cefIndex
@@ -175,8 +167,8 @@ class BrowserState: ObservableObject {
             }
             // No existing CEF tab — switch this tab to Chromium
             tab.useChromiumEngine = true
-            tab.useStandaloneChromium = isTeams
-            print("🔄 Switching to Chromium engine for: \(finalURL) (standalone=\(isTeams))")
+            tab.useStandaloneChromium = false
+            print("🔄 Switching to Chromium engine for: \(finalURL)")
             tab.navigate(to: finalURL)
             return
         }
@@ -478,13 +470,15 @@ class BrowserState: ObservableObject {
         "zoom.us",
         "app.zoom.us",
         "teams.microsoft.com",
-        "teams.live.com"
+        "teams.live.com",
+        "teams.cloud.microsoft"
     ]
 
     /// Teams domains that need standalone Chrome-style window for screen sharing
     private static let teamsDomains: Set<String> = [
         "teams.microsoft.com",
-        "teams.live.com"
+        "teams.live.com",
+        "teams.cloud.microsoft"
     ]
 
     /// Determina si una URL debería usar Chromium engine
