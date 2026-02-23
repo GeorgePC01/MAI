@@ -25,6 +25,10 @@ class WindowManager {
         window.title = isIncognito ? "MAI Browser — Incógnito" : "MAI Browser"
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        // Prevenir crash en _NSWindowTransformAnimation dealloc:
+        // NSWindow por defecto se auto-libera al cerrar, causando use-after-free
+        // en animaciones internas de AppKit (CoreAnimation transactions)
+        window.isReleasedWhenClosed = false
         window.animationBehavior = .none
         if isIncognito {
             window.backgroundColor = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1.0)
@@ -46,14 +50,16 @@ class WindowManager {
         windows.append((window: window, state: browserState))
 
         // Limpiar referencia cuando se cierre la ventana
-        // Delay para evitar crash en _NSWindowTransformAnimation dealloc
+        // Delay de 1s para que CoreAnimation termine todas las transacciones pendientes
         NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification,
             object: window,
             queue: .main
         ) { [weak self] notification in
             if let closedWindow = notification.object as? NSWindow {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                // Limpiar contenido inmediatamente para evitar referencias colgantes
+                closedWindow.contentView = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                     self?.windows.removeAll { $0.window === closedWindow }
                 }
             }
