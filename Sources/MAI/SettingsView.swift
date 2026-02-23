@@ -83,6 +83,7 @@ struct GeneralSettingsView: View {
 /// Configuración de privacidad
 struct PrivacySettingsView: View {
     @ObservedObject private var privacyManager = PrivacyManager.shared
+    @ObservedObject private var easyListManager = EasyListManager.shared
     @AppStorage("dnsOverHTTPS") private var dnsOverHTTPS = true
     @AppStorage("clearDataOnExit") private var clearDataOnExit = false
 
@@ -97,6 +98,43 @@ struct PrivacySettingsView: View {
                     Text("Los dominios de OAuth (Google, Microsoft, etc.) están en whitelist")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+            }
+
+            Section("EasyList (Listas de filtros)") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Usar EasyList + EasyPrivacy", isOn: $privacyManager.useEasyList)
+                    Text("~80,000 reglas de bloqueo de ads y trackers (mismas que uBlock Origin)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                if privacyManager.useEasyList {
+                    HStack {
+                        if easyListManager.isLoading {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .frame(width: 16, height: 16)
+                        } else {
+                            Image(systemName: easyListManager.isLoaded ? "checkmark.circle.fill" : "circle")
+                                .foregroundColor(easyListManager.isLoaded ? .green : .secondary)
+                        }
+                        Text(easyListManager.statusMessage)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        if let date = easyListManager.lastUpdateDate {
+                            Text(date, style: .relative)
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                        }
+                    }
+
+                    Button("Actualizar listas ahora") {
+                        Task { await easyListManager.forceUpdate() }
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(easyListManager.isLoading)
                 }
             }
 

@@ -216,6 +216,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Activar la aplicación
         NSApp.activate(ignoringOtherApps: true)
+
+        // Load EasyList filter lists in background
+        if PrivacyManager.shared.useEasyList {
+            Task {
+                await EasyListManager.shared.loadFilterLists()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {

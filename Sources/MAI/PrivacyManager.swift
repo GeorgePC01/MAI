@@ -19,6 +19,14 @@ class PrivacyManager: ObservableObject {
     @Published var fingerprintProtection: Bool {
         didSet { UserDefaults.standard.set(fingerprintProtection, forKey: "fingerprintProtection") }
     }
+    @Published var useEasyList: Bool {
+        didSet {
+            UserDefaults.standard.set(useEasyList, forKey: "useEasyList")
+            if useEasyList && !EasyListManager.shared.isLoaded {
+                Task { await EasyListManager.shared.loadFilterLists() }
+            }
+        }
+    }
 
     // MARK: - Dominios de OAuth (whitelist)
 
@@ -170,9 +178,15 @@ class PrivacyManager: ObservableObject {
         self.blockAds = UserDefaults.standard.object(forKey: "blockAds") as? Bool ?? true
         self.blockThirdPartyCookies = UserDefaults.standard.object(forKey: "blockThirdPartyCookies") as? Bool ?? true
         self.fingerprintProtection = UserDefaults.standard.object(forKey: "fingerprintProtection") as? Bool ?? true
+        self.useEasyList = UserDefaults.standard.object(forKey: "useEasyList") as? Bool ?? true
     }
 
     // MARK: - Public Methods
+
+    /// Returns OAuth whitelist domains for EasyListManager
+    func oauthDomainsList() -> [String] {
+        return Array(oauthWhitelist)
+    }
 
     /// Determina si un dominio está en la whitelist de OAuth
     func isOAuthDomain(_ host: String) -> Bool {

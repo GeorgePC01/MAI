@@ -188,6 +188,13 @@ class WebViewConfigurationManager {
         )
         config.userContentController.addUserScript(antiDetectionScript)
 
+        // Apply EasyList content blocking rules (compiled WKContentRuleList)
+        if PrivacyManager.shared.useEasyList {
+            for ruleList in EasyListManager.shared.compiledRuleLists {
+                config.userContentController.add(ruleList)
+            }
+        }
+
         return config
     }
 
