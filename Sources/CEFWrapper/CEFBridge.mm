@@ -361,7 +361,11 @@ static void init_life_span_handler() {
 // Forward declarations for window capture (defined after Permission Handler)
 static BOOL g_isCapturing = NO;
 static BOOL g_framePending = NO;
-static float g_jpegQuality = 0.85;
+static float g_jpegQuality = 0.92;
+static float g_jpegQualityMax = 0.95;
+static float g_jpegQualityMin = 0.80;
+static float g_jpegQualityStepDown = 0.03;
+static float g_jpegQualityStepUp = 0.01;
 static void stopWindowCapture(void);
 
 // MARK: - Load Handler
@@ -521,7 +525,10 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                     // Override getDisplayMedia with native screen/window picker
                     // Flow: JS prompt('MAI_SCREEN_PICKER') → ObjC JSDialog handler →
                     // SCShareableContent → NSAlert picker → SCStream capture →
-                    // JPEG base64 frames → window.__maiFrame → canvas → captureStream
+                    // JPEG base64 frames → window.__maiFrame → VideoFrame/canvas → WebRTC
+                    //
+                    // Dual-path: VideoFrame API (no canvas, direct frame injection, 15fps)
+                    //            Canvas fallback (captureStream(5), for older engines)
                     [js appendString:
                         @"if(navigator.mediaDevices){"
                             "navigator.mediaDevices.getDisplayMedia=function(constraints){"
@@ -534,34 +541,67 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                                         "return;"
                                     "}"
                                     "console.log('[MAI] getDisplayMedia: selected source:', result);"
+                                    "var isScreen=result.startsWith('screen:');"
+                                    "var stream;"
 
-                                    // Create canvas for frame relay
-                                    "var canvas=document.createElement('canvas');"
-                                    "canvas.width=1920;canvas.height=1080;"
-                                    "var ctx=canvas.getContext('2d');"
+                                    // Detect VideoFrame API support
+                                    "var useVideoFrame=typeof MediaStreamTrackGenerator==='function';"
+                                    "console.log('[MAI] VideoFrame API available:', useVideoFrame);"
 
-                                    // Draw initial black frame (captureStream needs at least 1 frame)
-                                    "ctx.fillStyle='#000';"
-                                    "ctx.fillRect(0,0,1920,1080);"
-                                    "ctx.fillStyle='#fff';ctx.font='24px sans-serif';"
-                                    "ctx.fillText('Starting screen share...',60,60);"
+                                    "if(useVideoFrame){"
+                                        // === VideoFrame path: direct frame injection, no canvas ===
+                                        "var generator=new MediaStreamTrackGenerator({kind:'video'});"
+                                        "var writer=generator.writable.getWriter();"
+                                        "var frameProcessing=false;"
 
-                                    // Frame callback: native code sends JPEG base64 via executeJavaScript
-                                    "var img=new Image();"
-                                    "window.__maiFrame=function(b64){"
-                                        "img.onload=function(){"
-                                            "if(canvas.width!==img.naturalWidth||canvas.height!==img.naturalHeight){"
-                                                "canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;"
-                                            "}"
-                                            "ctx.drawImage(img,0,0);"
+                                        "window.__maiFrame=function(b64){"
+                                            "if(frameProcessing)return;"
+                                            "frameProcessing=true;"
+                                            "fetch('data:image/jpeg;base64,'+b64)"
+                                                ".then(function(r){return r.blob();})"
+                                                ".then(function(blob){return createImageBitmap(blob);})"
+                                                ".then(function(bmp){"
+                                                    "var vf=new VideoFrame(bmp,{timestamp:performance.now()*1000});"
+                                                    "writer.write(vf);"
+                                                    "bmp.close();"
+                                                    "frameProcessing=false;"
+                                                "})"
+                                                ".catch(function(e){"
+                                                    "console.warn('[MAI] VideoFrame error:',e);"
+                                                    "frameProcessing=false;"
+                                                "});"
                                         "};"
-                                        "img.src='data:image/jpeg;base64,'+b64;"
-                                    "};"
 
-                                    // Create MediaStream from canvas
-                                    "var stream=canvas.captureStream(5);"
+                                        "stream=new MediaStream([generator]);"
+                                        "console.log('[MAI] Using VideoFrame API path (15fps, no canvas)');"
 
-                                    // Add silent audio track (some apps require it)
+                                    "}else{"
+                                        // === Canvas fallback: existing relay ===
+                                        "var canvas=document.createElement('canvas');"
+                                        "canvas.width=1920;canvas.height=1080;"
+                                        "var ctx=canvas.getContext('2d');"
+
+                                        "ctx.fillStyle='#000';"
+                                        "ctx.fillRect(0,0,1920,1080);"
+                                        "ctx.fillStyle='#fff';ctx.font='24px sans-serif';"
+                                        "ctx.fillText('Starting screen share...',60,60);"
+
+                                        "var img=new Image();"
+                                        "window.__maiFrame=function(b64){"
+                                            "img.onload=function(){"
+                                                "if(canvas.width!==img.naturalWidth||canvas.height!==img.naturalHeight){"
+                                                    "canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;"
+                                                "}"
+                                                "ctx.drawImage(img,0,0);"
+                                            "};"
+                                            "img.src='data:image/jpeg;base64,'+b64;"
+                                        "};"
+
+                                        "stream=canvas.captureStream(5);"
+                                        "console.log('[MAI] Using canvas fallback path (5fps)');"
+                                    "}"
+
+                                    // Shared: add silent audio track
                                     "try{"
                                         "var ac=new AudioContext();"
                                         "var osc=ac.createOscillator();"
@@ -572,27 +612,29 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                                         "stream.addTrack(dest.stream.getAudioTracks()[0]);"
                                     "}catch(e){console.warn('[MAI] Audio track creation failed:',e);}"
 
-                                    // Add displaySurface metadata to video track
+                                    // Shared: displaySurface metadata + cleanup
                                     "var vt=stream.getVideoTracks()[0];"
                                     "if(vt){"
-                                        "var isScreen=result.startsWith('screen:');"
                                         "var origGS=vt.getSettings.bind(vt);"
                                         "vt.getSettings=function(){"
                                             "var s=origGS();"
                                             "s.displaySurface=isScreen?'monitor':'window';"
                                             "s.cursor='always';"
+                                            "s.width=1920;s.height=1080;"
                                             "return s;"
                                         "};"
 
-                                        // Cleanup when track ends (user stops sharing)
                                         "vt.addEventListener('ended',function(){"
                                             "console.log('[MAI] Screen share track ended, stopping capture');"
+                                            "if(useVideoFrame&&writer){"
+                                                "try{writer.close();}catch(e){}"
+                                            "}"
                                             "prompt('MAI_STOP_CAPTURE');"
                                             "window.__maiFrame=null;"
                                         "});"
                                     "}"
 
-                                    "console.log('[MAI] getDisplayMedia: returning canvas stream, tracks:', "
+                                    "console.log('[MAI] getDisplayMedia: returning stream, tracks:', "
                                         "stream.getTracks().map(function(t){return t.kind+':'+t.readyState;}).join(', '));"
                                     "resolve(stream);"
                                 "});"
@@ -842,7 +884,7 @@ static void stopWindowCapture(void) {
     if (g_captureStream) {
         g_isCapturing = NO;
         g_framePending = NO;
-        g_jpegQuality = 0.85;
+        g_jpegQuality = 0.92;
         [g_captureStream stopCaptureWithCompletionHandler:^(NSError* error) {
             cef_log_to_file("Window capture stopped");
         }];
@@ -911,7 +953,7 @@ static void startDisplayCapture(SCDisplay* display) {
 
     // Adaptive: if previous frame still pending on main queue, skip & reduce quality
     if (g_framePending) {
-        if (g_jpegQuality > 0.4) g_jpegQuality -= 0.05;
+        if (g_jpegQuality > g_jpegQualityMin) g_jpegQuality -= g_jpegQualityStepDown;
         return; // Drop frame
     }
 
@@ -945,7 +987,7 @@ static void startDisplayCapture(SCDisplay* display) {
         NSString* js = [NSString stringWithFormat:
             @"window.__maiFrame&&window.__maiFrame('%@')", base64];
         // Frame delivered - increase quality towards max
-        if (g_jpegQuality < 0.85) g_jpegQuality += 0.02;
+        if (g_jpegQuality < g_jpegQualityMax) g_jpegQuality += g_jpegQualityStepUp;
         cef_frame_t* frame = g_browser->get_main_frame(g_browser);
         if (frame) {
             cef_string_t script = cef_string_from_nsstring(js);
@@ -1678,6 +1720,17 @@ static void CEF_CALLBACK on_before_command_line_processing(
     command_line->append_switch_with_value(command_line, &netLogCapKey, &netLogCapVal);
     cef_string_clear(&netLogCapKey);
     cef_string_clear(&netLogCapVal);
+
+    // Enable MediaStreamTrackGenerator (VideoFrame API) for direct frame
+    // injection without canvas relay. Available in Chromium 94+, but may need
+    // explicit feature flag in CEF's embedded mode.
+    {
+        cef_string_t efKey = cef_string_from_nsstring(@"enable-blink-features");
+        cef_string_t efVal = cef_string_from_nsstring(@"MediaStreamInsertableStreams");
+        command_line->append_switch_with_value(command_line, &efKey, &efVal);
+        cef_string_clear(&efKey);
+        cef_string_clear(&efVal);
+    }
 
     // NOTE: --auto-select-desktop-capture-source removed — it is Chrome-layer
     // only and has NO effect in Alloy mode (CEF Issue #3667).
