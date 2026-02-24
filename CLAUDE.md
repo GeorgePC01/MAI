@@ -113,66 +113,41 @@ MAI/
 └── CONTRIBUTING.md       # Guía contribución ✅
 ```
 
-## Estado Actual (2026-01-24)
+## Estado Actual (2026-02-24) — v0.6.0
 
 ### ✅ Completado
 
-1. **Estructura del proyecto completa**
-   - Directorios organizados
-   - Build system (Makefile)
-   - Swift Package Manager config
-   - Git setup
+1. **Navegador funcional completo**
+   - UI SwiftUI: MainWindow, TabBar, AddressBar, Sidebar, Settings
+   - WebKit para navegación general + CEF Chromium para videoconferencias
+   - Navegación completa: forward/back, zoom, historial, bookmarks, descargas
+   - Multi-ventana (Cmd+N), modo incógnito (Cmd+Shift+N)
+   - Find in page (Cmd+F), file upload, OAuth popups
 
-2. **Core Engine implementado**
-   - `BrowserEngine.swift` - Motor principal
-   - ModuleManager - Gestión de módulos
-   - ResourceManager - Gestión de recursos (stub)
-   - ProcessManager - Multi-proceso (stub)
-   - 3 módulos stub: AdBlocker, PrivacyShield, ResourceOptimizer
+2. **Motor Híbrido CEF (Chromium 145 + H.264)**
+   - Auto-detección Meet/Zoom/Teams → cambio automático a Chromium
+   - H.264 con codecs propietarios (OpenH264 + VideoToolbox, 311 MB)
+   - Screen/window sharing nativo: ScreenCaptureKit → VideoFrame API → WebRTC (15fps HD)
+   - Canvas fallback automático si VideoFrame API no disponible
+   - Permisos media auto-concedidos, popup handler para auth OAuth
 
-3. **Entry point funcional**
-   - `main.swift` con banner ASCII
-   - Inicialización del engine
-   - Creación de tabs
-   - Estadísticas básicas
+3. **Privacidad y seguridad**
+   - Tracker/ad blocking con whitelist OAuth
+   - Anti-fingerprinting reducido para compatibilidad enterprise
+   - Modo incógnito con WKWebsiteDataStore.nonPersistent()
 
-4. **Documentación completa**
-   - README con visión general
-   - ARCHITECTURE con diseño técnico
-   - MANIFESTO con filosofía
-   - QUICKSTART para comenzar
-   - TODO con roadmap
-   - CONTRIBUTING para colaboradores
+4. **Estabilidad (v0.6.0)**
+   - Fix crash shutdown: `forceReleaseBrowser` sincrónico en vez de message pump loop
+   - Fix crash dual-window: comparación de browser IDs en `on_before_close`
+   - Fix crash cambio de motor: release sincrónico antes de crear nuevo browser
+   - Fix Google login: `UR_FLAG_ALLOW_STORED_CREDENTIALS` universal (Chromium 145)
 
-5. **Infraestructura**
-   - GitHub Actions CI/CD
-   - MIT License
-   - .gitignore configurado
+### ⏳ Por Implementar
 
-### ⏳ Por Implementar (Prioridad Alta)
-
-1. **UI SwiftUI**
-   - MainWindow
-   - TabBar
-   - AddressBar
-   - WebView wrapper
-   - Settings panel
-
-2. **WebKit Integration**
-   - WKWebView wrapper
-   - Process-per-tab
-   - Navigation (forward/back/refresh)
-   - Downloads
-
-3. **Módulos Core Funcionales**
-   - AdBlocker con filter engine
-   - PrivacyShield completo
-   - ReaderMode
-
-4. **Navegación Básica**
-   - History
-   - Bookmarks
-   - Downloads manager
+1. **Lanzamiento**: Apple Developer, notarización, landing page
+2. **ML Integration**: Core ML para predicción, phishing, auto-suspension
+3. **Extensiones**: API de extensiones, marketplace
+4. **Multiplataforma**: Windows (WinUI), Linux (GTK)
 
 ## Filosofía del Proyecto
 
@@ -220,13 +195,13 @@ make stats
 
 ## Roadmap
 
-### Fase 1: MVP (Q1-Q2 2026)
+### Fase 1: MVP (Q1-Q2 2026) ✅
 - ✅ Estructura del proyecto
-- ✅ Core engine básico
-- ⏳ UI SwiftUI completa
-- ⏳ WebKit integration
-- ⏳ 3-5 módulos funcionales
-- ⏳ Navegación básica
+- ✅ Core engine + UI SwiftUI completa
+- ✅ WebKit + CEF hybrid engine
+- ✅ Screen sharing HD (VideoFrame API)
+- ✅ Modo incógnito, multi-ventana
+- ✅ Privacidad, OAuth, descargas, historial
 
 ### Fase 2: Funcionalidades Core (Q3 2026)
 - ML integration (Core ML)
@@ -318,25 +293,19 @@ MAI toma las mejores ideas de IE sin los errores:
 
 ## Próximos Pasos Inmediatos
 
-1. **Desarrollar UI en SwiftUI**
-   - Crear `src/ui/MainWindow.swift`
-   - TabBar con gestión visual
-   - AddressBar con auto-completado
+1. **Preparar lanzamiento**
+   - Obtener Apple Developer Account ($99/año)
+   - Notarización y firma de código
+   - Landing page con screenshots/demo
 
-2. **Integrar WebKit**
-   - Wrapper de WKWebView en `src/rendering/`
-   - Gestión de procesos por tab
-   - Navigation stack
+2. **Modelo freemium**
+   - Versión gratuita: WebKit completo, privacidad, tabs, historial
+   - Versión Pro: CEF (videoconferencias), screen sharing HD, gestor contraseñas
 
-3. **Implementar AdBlocker**
-   - Filter engine con EasyList
-   - WKContentRuleList integration
-   - Custom rules
-
-4. **Performance Testing**
-   - Memory profiling con Instruments
-   - Startup time measurement
-   - Comparar con Safari/Chrome
+3. **Optimización**
+   - Medir RAM con motor dual activo (WebKit + CEF)
+   - Tab suspension automática con ML
+   - Startup optimization
 
 ## Recursos de Referencia
 
@@ -373,6 +342,6 @@ Cuando el usuario mencione "MAI" o navegador:
 - Consulta ARCHITECTURE.md para decisiones técnicas
 - Consulta TODO.md para próximas tareas
 
-**Estado actual:** Core engine funcional, falta UI y WebKit integration.
+**Estado actual:** Navegador funcional completo (v0.6.0) — WebKit + CEF híbrido, screen sharing HD, modo incógnito, multi-ventana. Todos los crashes conocidos corregidos.
 
-**Siguiente objetivo:** Implementar MainWindow en SwiftUI.
+**Siguiente objetivo:** Preparar lanzamiento (Apple Developer, notarización, modelo freemium).

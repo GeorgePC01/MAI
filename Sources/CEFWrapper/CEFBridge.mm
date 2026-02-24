@@ -272,11 +272,25 @@ static int CEF_CALLBACK do_close(cef_life_span_handler_t* self,
 static void CEF_CALLBACK on_before_close(cef_life_span_handler_t* self,
                                           cef_browser_t* browser) {
     NSLog(@"[CEF] Browser closed (standalone=%d)", g_isStandaloneMode);
+    // Only clear g_browser if it matches the closing browser.
+    // If a new browser was already created (e.g., window switch), g_browser
+    // points to the NEW browser and we must NOT release it here.
+    BOOL wasCurrentBrowser = NO;
     if (g_browser) {
-        cef_release(&g_browser->base);
-        g_browser = NULL;
+        int closingId = browser->get_identifier(browser);
+        int currentId = g_browser->get_identifier(g_browser);
+        if (closingId == currentId) {
+            cef_release(&g_browser->base);
+            g_browser = NULL;
+            g_browserView = nil;
+            wasCurrentBrowser = YES;
+        } else {
+            NSLog(@"[CEF] on_before_close: skipping (closing=%d, current=%d)", closingId, currentId);
+        }
+    } else {
+        // g_browser already NULL (e.g., forceReleaseBrowser was called)
+        wasCurrentBrowser = YES;
     }
-    g_browserView = nil;
 
     // Close standalone NSWindow if present
     if (g_isStandaloneMode && g_standaloneNSWindow) {
@@ -287,17 +301,19 @@ static void CEF_CALLBACK on_before_close(cef_life_span_handler_t* self,
         g_isStandaloneMode = NO;
     }
 
-    // Stop message pump - no browser to service.
-    // CRITICAL: Must stop here to prevent cef_do_message_loop_work() from
-    // accessing deallocated NSViews (causes unrecognized selector crash).
-    stopMessagePump();
+    // Only stop message pump if the CURRENT browser closed.
+    // If a stale browser is closing while a new one is active, the new browser
+    // still needs the message pump running.
+    if (wasCurrentBrowser) {
+        stopMessagePump();
 
-    dispatch_async(dispatch_get_main_queue(), ^{
-        id<CEFBridgeDelegate> delegate = g_delegate;
-        if ([delegate respondsToSelector:@selector(cefBrowserDidClose)]) {
-            [delegate cefBrowserDidClose];
-        }
-    });
+        dispatch_async(dispatch_get_main_queue(), ^{
+            id<CEFBridgeDelegate> delegate = g_delegate;
+            if ([delegate respondsToSelector:@selector(cefBrowserDidClose)]) {
+                [delegate cefBrowserDidClose];
+            }
+        });
+    }
 }
 
 /// Handle popup requests — Microsoft auth (MFA) requires popups that share cookies.
@@ -372,6 +388,11 @@ static void stopWindowCapture(void);
 
 static cef_load_handler_t g_loadHandler;
 
+// Google passive login loop detector
+static int g_googlePassiveCount = 0;
+static NSTimeInterval g_googlePassiveFirstTime = 0;
+
+
 static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                                                    cef_browser_t* browser,
                                                    int isLoading,
@@ -384,6 +405,42 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
             cef_string_userfree_t frameUrl = frame->get_url(frame);
             if (frameUrl) {
                 NSString* urlStr = nsstring_from_cef_string(frameUrl);
+
+                // FIX: Google passive login loop breaker.
+                // When Meet redirects to accounts.google.com?passive=true,
+                // Google checks for a valid session. If session is missing/invalid,
+                // instead of showing the login form, the page loops every ~1s.
+                // Detect 3+ loads within 10s and strip passive=true to force the form.
+                if ([urlStr containsString:@"accounts.google.com"] &&
+                    [urlStr containsString:@"passive=true"]) {
+                    NSTimeInterval now = [[NSDate date] timeIntervalSince1970];
+                    if (now - g_googlePassiveFirstTime > 10.0) {
+                        // Reset counter if >10s since first detection
+                        g_googlePassiveCount = 0;
+                        g_googlePassiveFirstTime = now;
+                    }
+                    g_googlePassiveCount++;
+                    cef_log_to_file("Google passive login: attempt %d", g_googlePassiveCount);
+
+                    if (g_googlePassiveCount >= 3) {
+                        g_googlePassiveCount = 0;
+                        // Strip passive=true and sacu=1 to show actual login form
+                        NSString* fixedUrl = [urlStr stringByReplacingOccurrencesOfString:@"passive=true"
+                                                                              withString:@"passive=false"];
+                        fixedUrl = [fixedUrl stringByReplacingOccurrencesOfString:@"&sacu=1"
+                                                                      withString:@""];
+                        cef_log_to_file("Google passive loop BROKEN — forcing login form");
+                        cef_string_t navUrl = cef_string_from_nsstring(fixedUrl);
+                        frame->load_url(frame, &navUrl);
+                        cef_string_clear(&navUrl);
+                        cef_string_userfree_free(frameUrl);
+                        cef_release(&frame->base);
+                        return; // Don't process further
+                    }
+                } else if (![urlStr containsString:@"accounts.google.com"]) {
+                    g_googlePassiveCount = 0; // Reset when navigating away
+                }
+
                 // Match video conference HOSTNAMES only — not query params!
                 // login.live.com URLs contain "teams.microsoft.com" in the
                 // redirect_uri parameter, so containsString would incorrectly
@@ -1349,6 +1406,8 @@ static void CEF_CALLBACK on_resource_redirect_cb(
 
     if (request && response && new_url) {
         NSString* newUrlStr = new_url->str ? nsstring_from_cef_string(new_url) : @"";
+
+        // Microsoft redirect logging
         if ([newUrlStr containsString:@"login.live.com"] ||
             [newUrlStr containsString:@"login.microsoftonline.com"]) {
 
@@ -1387,57 +1446,14 @@ static cef_return_value_t CEF_CALLBACK on_before_resource_load_cb(
     NSString* url = nsstring_from_cef_string(urlStr);
     cef_string_userfree_free(urlStr);
 
-    // Force cookie credentials on ALL Microsoft auth domain requests
-    if ([url containsString:@"login.live.com"] ||
-        [url containsString:@"login.microsoftonline.com"]) {
-
-        int flags = request->get_flags(request);
-        // UR_FLAG_ALLOW_STORED_CREDENTIALS = 1 << 3 = 8
-        // This tells CEF to set credentials_mode = kInclude, which overrides
-        // Chromium's DO_NOT_SEND_COOKIES load flag for this request.
-        if (!(flags & UR_FLAG_ALLOW_STORED_CREDENTIALS)) {
-            int newFlags = flags | UR_FLAG_ALLOW_STORED_CREDENTIALS;
-            request->set_flags(request, newFlags);
-
-            NSString* urlPreview = [url length] > 80 ? [url substringToIndex:80] : url;
-            cef_log_to_file("FIX-COOKIES: Forced UR_FLAG_ALLOW_STORED_CREDENTIALS on %s (flags 0x%x -> 0x%x)",
-                            [urlPreview UTF8String], flags, newFlags);
-        }
-
-        // Diagnostic: Log outgoing Cookie header
-        cef_string_multimap_t headerMap = cef_string_multimap_alloc();
-        request->get_header_map(request, headerMap);
-        size_t count = cef_string_multimap_size(headerMap);
-
-        BOOL foundCookie = NO;
-        for (size_t i = 0; i < count; i++) {
-            cef_string_t key = {};
-            cef_string_t val = {};
-            cef_string_multimap_key(headerMap, i, &key);
-            cef_string_multimap_value(headerMap, i, &val);
-
-            NSString* keyStr = key.str ? nsstring_from_cef_string(&key) : @"";
-            if ([keyStr.lowercaseString isEqualToString:@"cookie"]) {
-                foundCookie = YES;
-                NSString* valStr = val.str ? nsstring_from_cef_string(&val) : @"";
-                NSString* preview = [valStr length] > 300 ?
-                    [NSString stringWithFormat:@"%@...(len=%lu)", [valStr substringToIndex:300], (unsigned long)[valStr length]] :
-                    valStr;
-                NSString* urlPreview = [url length] > 100 ? [url substringToIndex:100] : url;
-                cef_log_to_file("OUTGOING-COOKIE [%s]: %s", [urlPreview UTF8String], [preview UTF8String]);
-            }
-
-            cef_string_clear(&key);
-            cef_string_clear(&val);
-        }
-
-        if (!foundCookie) {
-            NSString* urlPreview = [url length] > 100 ? [url substringToIndex:100] : url;
-            cef_log_to_file("OUTGOING-COOKIE [%s]: (pre-attach, cookies added by network layer)",
-                            [urlPreview UTF8String]);
-        }
-
-        cef_string_multimap_free(headerMap);
+    // FIX: Chromium 145 sets DO_NOT_SEND_COOKIES (0x80000) on many request types,
+    // preventing cookies from being sent. This breaks authentication on Google Meet,
+    // Microsoft Teams, and Zoom. Since CEF is ONLY used for video conferencing sites,
+    // force UR_FLAG_ALLOW_STORED_CREDENTIALS on ALL requests unconditionally.
+    // This makes cookie behavior match a normal browser.
+    int flags = request->get_flags(request);
+    if (!(flags & UR_FLAG_ALLOW_STORED_CREDENTIALS)) {
+        request->set_flags(request, flags | UR_FLAG_ALLOW_STORED_CREDENTIALS);
     }
 
     return RV_CONTINUE;
@@ -1673,18 +1689,20 @@ static void CEF_CALLBACK on_before_command_line_processing(
     cef_string_clear(&flag5);
 
     // Disable Chrome-specific features that crash or are unneeded in embedded CEF.
-    // NOTE: Cookie/SameSite/ThirdParty flags were REMOVED — teams-for-linux
-    // (Electron) works without disabling any of these, and disabling them
-    // was causing oauth20_authorize.srf to reset MSPRequ co=0 (cookie test fail).
-    // Chromium's default cookie behavior is what Microsoft's auth servers expect.
+    // ThirdPartyCookiePhaseout: REQUIRED for Google login. Chromium 145 blocks
+    // third-party cookies by default, which breaks accounts.google.com cookie
+    // test (redirect loop with "Cookies are disabled"). CEF lacks Chrome's
+    // Related Website Sets that whitelist Google cross-domain cookies.
+    // Microsoft auth works fine with this disabled — the earlier co=0 issue
+    // was caused by ThirdPartyStoragePartitioning, not ThirdPartyCookiePhaseout.
     {
         cef_string_t dfKey = cef_string_from_nsstring(@"disable-features");
 
-        // Only disable Chrome UI/PWA features that crash or are unneeded
         NSString* features =
             @"MediaRouter,PwaNavigationCapturing,WebAppInstallation,"
             @"WebAppSystemMediaControls,DesktopPWAsAdditionalWindowingControls,"
-            @"ChromeWebAppShortcutCopier,BackForwardCache";
+            @"ChromeWebAppShortcutCopier,BackForwardCache,"
+            @"ThirdPartyCookiePhaseout";
 
         NSLog(@"[CEF] Adding disable-features: %@", features);
         cef_string_t dfVal = cef_string_from_nsstring(features);
@@ -1721,16 +1739,11 @@ static void CEF_CALLBACK on_before_command_line_processing(
     cef_string_clear(&netLogCapKey);
     cef_string_clear(&netLogCapVal);
 
-    // Enable MediaStreamTrackGenerator (VideoFrame API) for direct frame
-    // injection without canvas relay. Available in Chromium 94+, but may need
-    // explicit feature flag in CEF's embedded mode.
-    {
-        cef_string_t efKey = cef_string_from_nsstring(@"enable-blink-features");
-        cef_string_t efVal = cef_string_from_nsstring(@"MediaStreamInsertableStreams");
-        command_line->append_switch_with_value(command_line, &efKey, &efVal);
-        cef_string_clear(&efKey);
-        cef_string_clear(&efVal);
-    }
+    // NOTE: --enable-blink-features=MediaStreamInsertableStreams was tested
+    // but removed — it may interfere with Google's cookie test on
+    // accounts.google.com. MediaStreamTrackGenerator should be available
+    // by default in Chromium 145 (shipped in Chrome 94). If typeof check
+    // fails at runtime, re-enable with cookie impact testing.
 
     // NOTE: --auto-select-desktop-capture-source removed — it is Chrome-layer
     // only and has NO effect in Alloy mode (CEF Issue #3667).
@@ -1953,22 +1966,21 @@ static void stopMessagePump() {
 
     NSLog(@"[CEF] Shutting down...");
 
-    // Stop any active window capture
-    stopWindowCapture();
-
-    // Close browser first
-    [self closeBrowser];
-
-    // Pump remaining messages to let browser close complete
-    for (int i = 0; i < 100 && g_browser != NULL; i++) {
-        cef_do_message_loop_work();
-        usleep(10000);
+    // Force-release browser synchronously. Do NOT use closeBrowser + message pump loop:
+    // closeBrowser is async (sends IPC to renderer), and pumping messages via
+    // cef_do_message_loop_work() during shutdown hits stale internal CEF objects,
+    // causing "unrecognized selector" crashes (SIGTRAP in applicationWillTerminate).
+    // forceReleaseBrowser is synchronous: stops capture, stops message pump,
+    // NULLs g_browser, and releases the reference — no message pumping needed.
+    if (g_browser) {
+        [self forceReleaseBrowser];
+    } else {
+        // No browser, but still stop capture and message pump
+        stopWindowCapture();
+        stopMessagePump();
     }
 
-    // Stop message pump
-    stopMessagePump();
-
-    // Shutdown CEF
+    // Shutdown CEF — safe now that browser is released and message pump is stopped
     cef_shutdown();
     g_cefInitialized = NO;
 
@@ -1984,9 +1996,12 @@ static void stopMessagePump() {
         return nil;
     }
 
-    // Close existing browser if any
+    // Force-release existing browser if any.
+    // Must use forceReleaseBrowser (synchronous) instead of closeBrowser (async)
+    // because closeBrowser's on_before_close fires later and can NULL-out
+    // the NEW browser's g_browser reference, causing a crash.
     if (g_browser) {
-        [self closeBrowser];
+        [self forceReleaseBrowser];
     }
 
     NSLog(@"[CEF] Creating browser view for: %@", url);
@@ -2054,9 +2069,9 @@ static void stopMessagePump() {
         }
     }
 
-    // Close existing browser if any
+    // Force-release existing browser (see createBrowserViewWithURL comment)
     if (g_browser) {
-        [self closeBrowser];
+        [self forceReleaseBrowser];
     }
 
     NSLog(@"[CEF] Creating standalone NSWindow browser for: %@", url);
@@ -2157,43 +2172,10 @@ static void stopMessagePump() {
 }
 
 + (void)safeCloseBrowser {
-    if (!g_browser) return;
-
-    NSLog(@"[CEF] Safe-closing browser (synchronous)");
-
-    stopWindowCapture();
-
-    // Stop the 30Hz timer FIRST to prevent async cef_do_message_loop_work calls.
-    // We'll manually pump messages in a controlled loop below.
-    stopMessagePump();
-
-    // Initiate the close
-    cef_browser_host_t* host = g_browser->get_host(g_browser);
-    if (host) {
-        host->close_browser(host, 1); // force_close = true
-        cef_release(&host->base);
-    }
-
-    // Manually pump CEF messages until on_before_close sets g_browser = NULL.
-    // This lets CEF process the close sequence (IPC with renderer, cleanup)
-    // without the 30Hz timer interfering.
-    NSLog(@"[CEF] Pumping messages for close sequence...");
-    for (int i = 0; i < 300 && g_browser != NULL; i++) {
-        cef_do_message_loop_work();
-        // Brief sleep to allow IPC processing
-        usleep(10000); // 10ms
-    }
-
-    if (g_browser == NULL) {
-        NSLog(@"[CEF] Browser closed cleanly via on_before_close");
-    } else {
-        // Timeout — force release as fallback
-        NSLog(@"[CEF] Close timed out after 3s, force-releasing");
-        cef_browser_t* b = g_browser;
-        g_browser = NULL;
-        g_browserView = nil;
-        cef_release(&b->base);
-    }
+    // Delegate to forceReleaseBrowser — the message pump loop that was here
+    // caused "unrecognized selector" crashes when cef_do_message_loop_work()
+    // dispatched messages to partially torn-down CEF objects.
+    [self forceReleaseBrowser];
 }
 
 + (void)forceReleaseBrowser {

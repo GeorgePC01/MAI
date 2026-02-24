@@ -102,6 +102,7 @@
 - [x] Captura nativa SCStream a 640x360, 5fps, JPEG 0.3 quality → base64 → executeJavaScript
 - [x] Filtrado de ventanas (excluye MAI, ventanas pequeñas, sin título)
 - [x] Frameworks: ScreenCaptureKit, CoreMedia, CoreImage vinculados en Package.swift
+- [x] VideoFrame API (v0.6.0): frames directos sin canvas intermediario, 15fps nativo
 
 ### CEF con Codecs Propietarios / Teams Screen Sharing (v0.5.0) ✅
 - **Problema**: Teams requiere H.264 para screen sharing (VBSS). CEF estándar no incluye H.264.
@@ -120,7 +121,7 @@
 - [x] Dominio teams.cloud.microsoft agregado a detección
 - [x] Screen sharing funcional en Teams (H.264 VBSS) y Meet
 - [ ] Medir impacto en RAM con nuevo framework
-- [ ] Optimizar calidad de canvas relay (VideoFrame API futuro)
+- [x] VideoFrame API reemplaza canvas relay (v0.6.0)
 
 ### Modo Incógnito (v0.5.1) ✅
 - [x] Ventana incógnito (Cmd+Shift+N) con BrowserState.isIncognito a nivel de ventana
@@ -133,6 +134,18 @@
 - [x] Icono eye.slash.fill en tabs incógnito
 - [x] Menú contextual "Nueva Ventana Incógnito"
 - [x] WindowManager con soporte isIncognito (título y fondo de ventana)
+
+### VideoFrame API + Crash Fixes (v0.6.0) ✅
+- [x] VideoFrame API: frames directos al WebRTC sin canvas intermediario (15fps nativo)
+- [x] Calidad JPEG adaptativa: 0.80-0.95 (antes 0.40-0.85), espacio de color sRGB
+- [x] Feature flag: `--enable-blink-features=MediaStreamInsertableStreams` para CEF 145
+- [x] Canvas fallback automático si MediaStreamTrackGenerator no disponible
+- [x] Fix crash shutdown (SIGTRAP): `shutdownCEF` usa `forceReleaseBrowser` (sync) en vez de `closeBrowser` + message pump loop
+- [x] Fix crash dual-window: `on_before_close` compara browser IDs, no mata message pump de browser activo
+- [x] Fix crash cambio de motor: `createBrowserViewWithURL`/`openStandaloneBrowserWithURL` usan `forceReleaseBrowser` (sync)
+- [x] Fix Google login cookies: `UR_FLAG_ALLOW_STORED_CREDENTIALS` forzado en TODAS las requests (Chromium 145 `DO_NOT_SEND_COOKIES`)
+- [x] Fix login loop: eliminado mecanismo SETOSID-RETRY que rompía cadena de redirects Google auth
+- [x] `safeCloseBrowser` delegado a `forceReleaseBrowser` (eliminado message pump loop peligroso)
 
 ## Fase 1.5: Preparación para Lanzamiento (Q2 2026)
 
@@ -152,11 +165,11 @@
 - [ ] Detección de phishing
 - [ ] Soporte prioritario
 
-### Calidad HD de Screen Sharing (Pro)
-- [ ] VideoFrame API: eliminar canvas intermediario, inyectar frames directamente
+### Calidad HD de Screen Sharing (Pro) ✅
+- [x] VideoFrame API: eliminar canvas intermediario, inyectar frames directamente (v0.6.0)
 - [ ] WebSocket binario: eliminar overhead base64 (33% menos datos)
-- [ ] Calidad nativa: compresión única VP9 (igual que Chrome)
-- [ ] Estimación de esfuerzo: 3-5 días
+- [x] Calidad mejorada: JPEG 0.80-0.95 + compresión única VP9
+- [x] 15fps nativo (antes 5fps con captureStream)
 
 ### Lanzamiento
 - [ ] Landing page (sitio web con demo/screenshots)
@@ -258,4 +271,4 @@
 
 ---
 
-**Última actualización: 2026-02-23 (v0.5.0)**
+**Última actualización: 2026-02-24 (v0.6.0)**
