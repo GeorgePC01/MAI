@@ -66,10 +66,6 @@ struct BrowserView: View {
         .background(browserState.isIncognito
                     ? Color(red: 0.10, green: 0.10, blue: 0.12)
                     : Color(NSColor.windowBackgroundColor))
-        .onTapGesture {
-            // Activar la aplicación cuando se hace clic en la ventana
-            NSApplication.shared.activate(ignoringOtherApps: true)
-        }
     }
 }
 

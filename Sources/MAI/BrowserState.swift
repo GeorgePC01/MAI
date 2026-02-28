@@ -146,9 +146,24 @@ class BrowserState: ObservableObject {
 
     func toggleMuteTab(_ tab: Tab) {
         tab.isMuted.toggle()
-        tab.webView?.evaluateJavaScript("""
-            document.querySelectorAll('video, audio').forEach(el => el.muted = \(tab.isMuted));
-        """)
+        applyMuteState(tab)
+    }
+
+    /// Aplica el estado de mute al webview (WebKit o CEF)
+    func applyMuteState(_ tab: Tab) {
+        let muteJS = "document.querySelectorAll('video, audio').forEach(el => el.muted = \(tab.isMuted));"
+
+        if tab.useChromiumEngine {
+            CEFBridge.executeJavaScript(muteJS)
+        } else if let webView = tab.webView {
+            webView.evaluateJavaScript(muteJS) { _, error in
+                if let error = error {
+                    print("⚠️ Mute failed for '\(tab.title)': \(error.localizedDescription)")
+                }
+            }
+        } else {
+            print("⚠️ Cannot mute tab '\(tab.title)': no webView available")
+        }
     }
 
     func closeOtherTabs(except tab: Tab) {
@@ -310,7 +325,8 @@ class BrowserState: ObservableObject {
         tab.suspendedSnapshot = nil
 
         // La WebView se recreará automáticamente en WebViewContainer
-        // y cargará la URL guardada
+        // y cargará la URL guardada.
+        // El mute state se re-aplica en webView(_:didFinish:) del Coordinator.
 
         print("⏰ Tab restaurada: \(tab.title)")
     }

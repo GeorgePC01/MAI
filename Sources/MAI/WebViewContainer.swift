@@ -402,6 +402,11 @@ struct WebViewRepresentable: NSViewRepresentable {
 
             // Obtener favicon
             fetchFavicon(for: webView)
+
+            // Re-aplicar mute si el tab está silenciado
+            if tab.isMuted {
+                browserState.applyMuteState(tab)
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
