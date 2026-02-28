@@ -1108,22 +1108,14 @@ static int CEF_CALLBACK on_jsdialog(
                 return;
             }
 
-            NSMutableArray<NSString*>* displayNames = [NSMutableArray array];
-            // Track type: "S" for screen, "W:idx" for window
+            // Track type: "S:idx" for screen, "W:idx" for window
             NSMutableArray<NSString*>* sourceTypes = [NSMutableArray array];
 
-            // Add screens
+            // Enumerate screens
             NSArray<SCDisplay*>* displays = content.displays;
             g_enumeratedDisplays = [displays copy];
-            if (displays.count == 1) {
-                [displayNames addObject:@"\xF0\x9F\x96\xA5 Entire screen"];
-                [sourceTypes addObject:@"S:0"];
-            } else {
-                for (NSUInteger i = 0; i < displays.count; i++) {
-                    [displayNames addObject:[NSString stringWithFormat:
-                        @"\xF0\x9F\x96\xA5 Screen %lu", (unsigned long)(i + 1)]];
-                    [sourceTypes addObject:[NSString stringWithFormat:@"S:%lu", (unsigned long)i]];
-                }
+            for (NSUInteger i = 0; i < displays.count; i++) {
+                [sourceTypes addObject:[NSString stringWithFormat:@"S:%lu", (unsigned long)i]];
             }
 
             // Filter and store windows
@@ -1135,9 +1127,6 @@ static int CEF_CALLBACK on_jsdialog(
                     [window.owningApplication.applicationName isEqualToString:myAppName]) continue;
                 if (window.frame.size.width < 100 || window.frame.size.height < 100) continue;
 
-                NSString* appName = window.owningApplication.applicationName ?: @"Unknown";
-                [displayNames addObject:[NSString stringWithFormat:
-                    @"\xF0\x9F\xAA\x9F %@ - %@", appName, window.title]];
                 [sourceTypes addObject:[NSString stringWithFormat:
                     @"W:%lu", (unsigned long)filteredWindows.count]];
                 [filteredWindows addObject:window];
@@ -1145,7 +1134,7 @@ static int CEF_CALLBACK on_jsdialog(
 
             g_enumeratedWindows = [filteredWindows copy];
 
-            if (displayNames.count == 0) {
+            if (sourceTypes.count == 0) {
                 cef_string_t empty = {};
                 callback->cont(callback, 0, &empty);
                 cef_release(&callback->base);
@@ -1156,49 +1145,267 @@ static int CEF_CALLBACK on_jsdialog(
                             (unsigned long)displays.count,
                             (unsigned long)filteredWindows.count);
 
+            // --- Build visual picker with thumbnails ---
+
+            static const CGFloat kThumbW = 160.0;
+            static const CGFloat kThumbH = 100.0;
+            static const CGFloat kItemW = 170.0;
+            static const CGFloat kItemH = 140.0;
+            static const CGFloat kPadding = 10.0;
+            static const CGFloat kSectionPad = 8.0;
+            static const int kColumns = 3;
+
+            // Helper: get real display name from NSScreen
+            NSString* (^getDisplayName)(SCDisplay*, NSUInteger) = ^NSString*(SCDisplay* display, NSUInteger index) {
+                for (NSScreen* screen in NSScreen.screens) {
+                    NSNumber* screenNumber = screen.deviceDescription[@"NSScreenNumber"];
+                    if (screenNumber && [screenNumber unsignedIntValue] == display.displayID) {
+                        return screen.localizedName;
+                    }
+                }
+                return [NSString stringWithFormat:@"Screen %lu", (unsigned long)(index + 1)];
+            };
+
+            // Helper: create scaled thumbnail from CGImage
+            NSImage* (^makeThumbnail)(CGImageRef) = ^NSImage*(CGImageRef cgImg) {
+                if (!cgImg) {
+                    NSImage* placeholder = [[NSImage alloc] initWithSize:NSMakeSize(kThumbW, kThumbH)];
+                    [placeholder lockFocus];
+                    [[NSColor darkGrayColor] setFill];
+                    NSRectFill(NSMakeRect(0, 0, kThumbW, kThumbH));
+                    [placeholder unlockFocus];
+                    return placeholder;
+                }
+                NSImage* img = [[NSImage alloc] initWithCGImage:cgImg size:NSZeroSize];
+                NSImage* thumb = [[NSImage alloc] initWithSize:NSMakeSize(kThumbW, kThumbH)];
+                [thumb lockFocus];
+                [[NSColor blackColor] setFill];
+                NSRectFill(NSMakeRect(0, 0, kThumbW, kThumbH));
+                [img drawInRect:NSMakeRect(0, 0, kThumbW, kThumbH)
+                       fromRect:NSZeroRect
+                      operation:NSCompositingOperationSourceOver
+                       fraction:1.0];
+                [thumb unlockFocus];
+                return thumb;
+            };
+
+            // Map views to source indices
+            NSMapTable<NSView*, NSNumber*>* viewTagMap =
+                [NSMapTable mapTableWithKeyOptions:NSPointerFunctionsObjectPointerPersonality
+                                      valueOptions:NSPointerFunctionsObjectPersonality];
+
+            // Helper: create one picker item view (thumbnail + label)
+            NSView* (^makeItem)(NSImage*, NSString*, NSInteger) = ^NSView*(NSImage* thumb, NSString* name, NSInteger itemTag) {
+                NSView* item = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, kItemW, kItemH)];
+                item.wantsLayer = YES;
+                item.layer.cornerRadius = 8.0;
+                item.layer.borderWidth = 2.0;
+                item.layer.borderColor = [NSColor clearColor].CGColor;
+                [viewTagMap setObject:@(itemTag) forKey:item];
+
+                NSImageView* iv = [[NSImageView alloc] initWithFrame:
+                    NSMakeRect((kItemW - kThumbW) / 2.0, 34, kThumbW, kThumbH)];
+                iv.image = thumb;
+                iv.imageScaling = NSImageScaleProportionallyUpOrDown;
+                iv.wantsLayer = YES;
+                iv.layer.cornerRadius = 4.0;
+                iv.layer.masksToBounds = YES;
+                [item addSubview:iv];
+
+                NSTextField* lbl = [NSTextField labelWithString:name];
+                lbl.frame = NSMakeRect(2, 4, kItemW - 4, 28);
+                lbl.alignment = NSTextAlignmentCenter;
+                lbl.font = [NSFont systemFontOfSize:11.0];
+                lbl.lineBreakMode = NSLineBreakByTruncatingTail;
+                lbl.maximumNumberOfLines = 2;
+                [item addSubview:lbl];
+
+                return item;
+            };
+
+            // Build items for screens
+            NSMutableArray<NSView*>* screenItems = [NSMutableArray array];
+            for (NSUInteger i = 0; i < displays.count; i++) {
+                CGImageRef cgImg = CGDisplayCreateImage(displays[i].displayID);
+                NSImage* thumb = makeThumbnail(cgImg);
+                if (cgImg) CGImageRelease(cgImg);
+                NSString* name = getDisplayName(displays[i], i);
+                NSView* item = makeItem(thumb, name, (NSInteger)i);
+                [screenItems addObject:item];
+            }
+
+            // Build items for windows
+            NSMutableArray<NSView*>* windowItems = [NSMutableArray array];
+            for (NSUInteger i = 0; i < filteredWindows.count; i++) {
+                CGImageRef cgImg = CGWindowListCreateImage(
+                    CGRectNull,
+                    kCGWindowListOptionIncludingWindow,
+                    filteredWindows[i].windowID,
+                    kCGWindowImageBoundsIgnoreFraming);
+                NSImage* thumb = makeThumbnail(cgImg);
+                if (cgImg) CGImageRelease(cgImg);
+                NSString* appName = filteredWindows[i].owningApplication.applicationName ?: @"Unknown";
+                NSString* title = filteredWindows[i].title ?: @"";
+                NSString* name = [NSString stringWithFormat:@"%@ - %@", appName, title];
+                NSView* item = makeItem(thumb, name, (NSInteger)(displays.count + i));
+                [windowItems addObject:item];
+            }
+
+            // Layout helper: arrange items in rows
+            NSView* (^makeSection)(NSString*, NSArray<NSView*>*) = ^NSView*(NSString* title, NSArray<NSView*>* items) {
+                if (items.count == 0) return nil;
+                NSUInteger rows = (items.count + kColumns - 1) / kColumns;
+                CGFloat sectionW = kColumns * kItemW + (kColumns - 1) * kPadding;
+                CGFloat sectionH = 24 + rows * kItemH + (rows - 1) * kPadding;
+
+                NSView* section = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, sectionW, sectionH)];
+
+                NSTextField* header = [NSTextField labelWithString:title];
+                header.frame = NSMakeRect(0, sectionH - 20, sectionW, 18);
+                header.font = [NSFont boldSystemFontOfSize:12.0];
+                header.textColor = [NSColor secondaryLabelColor];
+                [section addSubview:header];
+
+                for (NSUInteger i = 0; i < items.count; i++) {
+                    NSUInteger col = i % kColumns;
+                    NSUInteger row = i / kColumns;
+                    CGFloat x = col * (kItemW + kPadding);
+                    CGFloat y = sectionH - 24 - (row + 1) * kItemH - row * kPadding;
+                    NSView* item = items[i];
+                    [item setFrameOrigin:NSMakePoint(x, y)];
+                    [section addSubview:item];
+                }
+                return section;
+            };
+
+            NSView* screenSection = makeSection(@"Screens", screenItems);
+            NSView* windowSection = makeSection(@"Windows", windowItems);
+
+            // Calculate total content size
+            CGFloat contentW = kColumns * kItemW + (kColumns - 1) * kPadding + 20;
+            CGFloat contentH = 0;
+            if (screenSection) contentH += screenSection.frame.size.height + kSectionPad;
+            if (windowSection) contentH += windowSection.frame.size.height + kSectionPad;
+
+            // Container view for all sections
+            NSView* container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, contentW, contentH)];
+            CGFloat yOff = contentH;
+            if (screenSection) {
+                yOff -= screenSection.frame.size.height;
+                [screenSection setFrameOrigin:NSMakePoint(10, yOff)];
+                [container addSubview:screenSection];
+                yOff -= kSectionPad;
+            }
+            if (windowSection) {
+                yOff -= windowSection.frame.size.height;
+                [windowSection setFrameOrigin:NSMakePoint(10, yOff)];
+                [container addSubview:windowSection];
+            }
+
+            // Wrap in scroll view
+            CGFloat maxVisibleH = 420.0;
+            CGFloat visibleH = fmin(contentH, maxVisibleH);
+            NSScrollView* scrollView = [[NSScrollView alloc]
+                initWithFrame:NSMakeRect(0, 0, contentW + 20, visibleH)];
+            scrollView.hasVerticalScroller = (contentH > maxVisibleH);
+            scrollView.documentView = container;
+            scrollView.drawsBackground = NO;
+
+            // Selection state
+            __block NSInteger selectedIndex = 0;
+
+            // Highlight helper
+            void (^updateSelection)(NSInteger) = ^(NSInteger newIndex) {
+                // Clear old
+                NSArray<NSView*>* allSections = @[];
+                if (screenSection && windowSection)
+                    allSections = @[screenSection, windowSection];
+                else if (screenSection)
+                    allSections = @[screenSection];
+                else if (windowSection)
+                    allSections = @[windowSection];
+
+                for (NSView* sec in allSections) {
+                    for (NSView* sub in sec.subviews) {
+                        NSNumber* subTag = [viewTagMap objectForKey:sub];
+                        if (subTag && sub.wantsLayer) {
+                            BOOL match = ([subTag integerValue] == newIndex);
+                            sub.layer.borderColor = match
+                                ? [NSColor systemBlueColor].CGColor
+                                : [NSColor clearColor].CGColor;
+                            sub.layer.backgroundColor = match
+                                ? [[NSColor systemBlueColor] colorWithAlphaComponent:0.1].CGColor
+                                : [NSColor clearColor].CGColor;
+                        }
+                    }
+                }
+                selectedIndex = newIndex;
+            };
+
+            // Select first item by default
+            updateSelection(0);
+
+            // Install click gesture on each item
+            NSMutableArray<NSView*>* allItems = [NSMutableArray array];
+            [allItems addObjectsFromArray:screenItems];
+            [allItems addObjectsFromArray:windowItems];
+
+            // Use a local event monitor for clicks inside the scroll view
+            __block id clickMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
+                handler:^NSEvent*(NSEvent* event) {
+                    NSPoint loc = [scrollView convertPoint:[event locationInWindow] fromView:nil];
+                    if (!NSPointInRect(loc, scrollView.bounds)) return event;
+
+                    NSPoint docLoc = [container convertPoint:[event locationInWindow] fromView:nil];
+                    for (NSView* item in allItems) {
+                        NSPoint itemLoc = [item convertPoint:docLoc fromView:container];
+                        if (NSPointInRect(itemLoc, item.bounds)) {
+                            NSNumber* itemTag = [viewTagMap objectForKey:item];
+                            if (itemTag) updateSelection([itemTag integerValue]);
+                            break;
+                        }
+                    }
+                    return event;
+                }];
+
+            // Show alert
             NSAlert* alert = [[NSAlert alloc] init];
             alert.messageText = @"Share your screen";
             alert.informativeText = @"Choose what to share:";
             [alert addButtonWithTitle:@"Share"];
             [alert addButtonWithTitle:@"Cancel"];
-
-            NSPopUpButton* popup = [[NSPopUpButton alloc]
-                                    initWithFrame:NSMakeRect(0, 0, 350, 28)];
-            for (NSString* name in displayNames) {
-                [popup addItemWithTitle:name];
-            }
-            alert.accessoryView = popup;
+            alert.accessoryView = scrollView;
+            alert.window.minSize = NSMakeSize(contentW + 60, visibleH + 160);
 
             NSModalResponse response = [alert runModal];
 
+            // Remove click monitor
+            [NSEvent removeMonitor:clickMonitor];
+            clickMonitor = nil;
+
             if (response == NSAlertFirstButtonReturn) {
-                NSInteger idx = popup.indexOfSelectedItem;
-                NSString* type = sourceTypes[idx];
+                NSString* type = sourceTypes[selectedIndex];
 
                 if ([type hasPrefix:@"S:"]) {
-                    // Screen selected → return Chromium source ID for getUserMedia
-                    // Format: "screen:DISPLAY_ID:0" (same as Electron desktopCapturer)
                     NSInteger dispIdx = [[type substringFromIndex:2] integerValue];
                     SCDisplay* selectedDisplay = g_enumeratedDisplays[dispIdx];
                     NSString* sourceId = [NSString stringWithFormat:@"screen:%u:0",
                                           selectedDisplay.displayID];
-                    cef_log_to_file("Screen picker: User selected display %u → %s",
-                                    selectedDisplay.displayID, [sourceId UTF8String]);
-                    // Also start SCStream capture as fallback if getUserMedia fails
+                    cef_log_to_file("Screen picker: User selected display %u (%s) → %s",
+                                    selectedDisplay.displayID,
+                                    [getDisplayName(selectedDisplay, dispIdx) UTF8String],
+                                    [sourceId UTF8String]);
                     startDisplayCapture(selectedDisplay);
                     cef_string_t result = cef_string_from_nsstring(sourceId);
                     callback->cont(callback, 1, &result);
                     cef_string_clear(&result);
                 } else if ([type hasPrefix:@"W:"]) {
-                    // Window selected → return Chromium source ID for getUserMedia
-                    // Format: "window:WINDOW_ID:0"
                     NSInteger winIdx = [[type substringFromIndex:2] integerValue];
                     SCWindow* selectedWindow = g_enumeratedWindows[winIdx];
                     NSString* sourceId = [NSString stringWithFormat:@"window:%u:0",
                                           selectedWindow.windowID];
                     cef_log_to_file("Screen picker: User selected window '%s' → %s",
                                     [selectedWindow.title UTF8String], [sourceId UTF8String]);
-                    // Also start SCStream capture as fallback if getUserMedia fails
                     startWindowCapture(selectedWindow);
                     cef_string_t result = cef_string_from_nsstring(sourceId);
                     callback->cont(callback, 1, &result);
