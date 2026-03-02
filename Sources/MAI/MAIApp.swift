@@ -217,6 +217,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Activar la aplicación
         NSApp.activate(ignoringOtherApps: true)
 
+        // Limpiar snapshots huérfanos de sesión anterior
+        let snapshotsDir = Tab.snapshotsDirectory
+        if FileManager.default.fileExists(atPath: snapshotsDir.path) {
+            try? FileManager.default.removeItem(at: snapshotsDir)
+            print("🧹 Snapshots huérfanos limpiados")
+        }
+
         // Load EasyList filter lists in background
         if PrivacyManager.shared.useEasyList {
             Task {

@@ -41,18 +41,19 @@ struct WebViewContainer: View {
     }
 }
 
-/// Vista para tabs suspendidas - muestra snapshot con opción de restaurar
+/// Vista para tabs suspendidas - carga snapshot de disco lazily para 0 RAM
 struct SuspendedTabView: View {
     @ObservedObject var tab: Tab
     @EnvironmentObject var browserState: BrowserState
+    @State private var snapshotImage: NSImage?
 
     var body: some View {
         ZStack {
             // Fondo
             Color(NSColor.textBackgroundColor)
 
-            // Snapshot si existe
-            if let snapshot = tab.suspendedSnapshot {
+            // Snapshot cargado lazy desde disco
+            if let snapshot = snapshotImage {
                 Image(nsImage: snapshot)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
@@ -98,6 +99,21 @@ struct SuspendedTabView: View {
             )
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            // Cargar snapshot de disco en background
+            guard let path = tab.snapshotPath else { return }
+            DispatchQueue.global(qos: .userInitiated).async {
+                if let image = NSImage(contentsOf: path) {
+                    DispatchQueue.main.async {
+                        snapshotImage = image
+                    }
+                }
+            }
+        }
+        .onDisappear {
+            // Liberar imagen de RAM cuando no es visible
+            snapshotImage = nil
+        }
     }
 }
 
@@ -366,6 +382,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         func webView(_ webView: WKWebView, didStartProvisionalNavigation navigation: WKNavigation!) {
             tab.isLoading = true
             browserState.isLoading = true
+            tab.recordInteraction()
 
             // Debug: ver a dónde estamos navegando
             if let url = webView.url {
@@ -376,6 +393,7 @@ struct WebViewRepresentable: NSViewRepresentable {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
             tab.isLoading = false
             browserState.isLoading = false
+            tab.recordInteraction()
 
             // Si terminamos de cargar SafeLinks, extraer y navegar a URL real
             if let currentURL = webView.url,
@@ -445,6 +463,25 @@ struct WebViewRepresentable: NSViewRepresentable {
                     webView.load(URLRequest(url: realURL))
                 }
                 return
+            }
+
+            // Detección de phishing — omitir si el usuario ya hizo bypass de esta URL
+            if url.absoluteString != browserState.phishingBypassURL {
+                let threat = PhishingDetector.shared.analyze(url: url)
+                switch threat {
+                case .suspicious, .dangerous:
+                    print("🚨 Phishing detectado: \(url.absoluteString)")
+                    decisionHandler(.cancel)
+                    DispatchQueue.main.async { [weak self] in
+                        guard let self = self else { return }
+                        self.browserState.pendingPhishingURL = url.absoluteString
+                        self.browserState.phishingThreatLevel = threat
+                        self.browserState.showPhishingWarning = true
+                    }
+                    return
+                case .safe:
+                    break
+                }
             }
 
             // Interceptar dominios de videoconferencia → cambiar a Chromium

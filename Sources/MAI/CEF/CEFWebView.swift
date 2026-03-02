@@ -137,6 +137,7 @@ struct CEFWebView: NSViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 self?.tab.isLoading = true
                 self?.browserState.isLoading = true
+                self?.tab.recordInteraction()
             }
         }
 
@@ -144,6 +145,7 @@ struct CEFWebView: NSViewRepresentable {
             DispatchQueue.main.async { [weak self] in
                 self?.tab.isLoading = false
                 self?.browserState.isLoading = false
+                self?.tab.recordInteraction()
             }
         }
 

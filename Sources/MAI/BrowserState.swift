@@ -15,6 +15,12 @@ class BrowserState: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var loadingProgress: Double = 0
 
+    // Estado de detección de phishing
+    @Published var showPhishingWarning: Bool = false
+    @Published var pendingPhishingURL: String = ""
+    @Published var phishingThreatLevel: PhishingThreatLevel = .safe
+    var phishingBypassURL: String?
+
     // Incognito window — all tabs inherit this mode
     let isIncognito: Bool
 
@@ -72,6 +78,9 @@ class BrowserState: ObservableObject {
 
         // Iniciar monitoreo de stats
         startStatsMonitoring()
+
+        // Iniciar gestor de auto-suspensión
+        AutoSuspendManager.shared.start(browserState: self)
     }
 
     deinit {
@@ -90,6 +99,11 @@ class BrowserState: ObservableObject {
         guard force || tabs.count > 1 else { return }  // Mantener al menos 1 tab
 
         let closingTab = tabs[index]
+        AutoSuspendManager.shared.tabClosed(closingTab)
+        // Limpiar snapshot de disco
+        if let path = closingTab.snapshotPath {
+            try? FileManager.default.removeItem(at: path)
+        }
         if closingTab.useChromiumEngine {
             // CEF browser will be closed by CEFWebView.dismantleNSView (async)
             // when SwiftUI removes the view from the hierarchy
@@ -113,7 +127,9 @@ class BrowserState: ObservableObject {
 
     func selectTab(at index: Int) {
         guard tabs.indices.contains(index) else { return }
+        currentTab?.recordInteraction() // Marca actividad en el tab que dejamos
         currentTabIndex = index
+        tabs[index].recordInteraction()
     }
 
     func moveTab(from source: IndexSet, to destination: Int) {
@@ -166,13 +182,42 @@ class BrowserState: ObservableObject {
         }
     }
 
+    // MARK: - Navegación Phishing
+
+    /// Proceder a la URL marcada como phishing (usuario clickeó "Continuar de todos modos")
+    func proceedToPhishingURL() {
+        guard !pendingPhishingURL.isEmpty else { return }
+        phishingBypassURL = pendingPhishingURL
+        showPhishingWarning = false
+        navigate(to: pendingPhishingURL)
+        // Limpiar bypass después de un breve retraso para permitir que la navegación complete
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) { [weak self] in
+            self?.phishingBypassURL = nil
+        }
+        pendingPhishingURL = ""
+        phishingThreatLevel = .safe
+    }
+
+    /// Cancelar navegación a URL de phishing (usuario clickeó "Volver")
+    func cancelPhishingNavigation() {
+        showPhishingWarning = false
+        pendingPhishingURL = ""
+        phishingThreatLevel = .safe
+    }
+
     func closeOtherTabs(except tab: Tab) {
+        for t in tabs where t.id != tab.id {
+            if let path = t.snapshotPath { try? FileManager.default.removeItem(at: path) }
+        }
         tabs.removeAll { $0.id != tab.id }
         currentTabIndex = 0
     }
 
     func closeTabsToRight(of tab: Tab) {
         guard let index = tabs.firstIndex(where: { $0.id == tab.id }) else { return }
+        for t in tabs[(index + 1)...] {
+            if let path = t.snapshotPath { try? FileManager.default.removeItem(at: path) }
+        }
         tabs.removeSubrange((index + 1)...)
         if currentTabIndex >= tabs.count {
             currentTabIndex = tabs.count - 1
@@ -187,6 +232,7 @@ class BrowserState: ObservableObject {
 
     func navigate(to urlString: String) {
         guard let tab = currentTab else { return }
+        tab.recordInteraction()
 
         var finalURL = urlString.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -294,11 +340,24 @@ class BrowserState: ObservableObject {
     func suspendTab(_ tab: Tab) {
         guard !tab.isSuspended, let webView = tab.webView else { return }
 
-        // 1. Capturar screenshot
+        // 1. Capturar screenshot → comprimir JPEG → escribir a disco
         let config = WKSnapshotConfiguration()
+        let tabID = tab.id
         webView.takeSnapshot(with: config) { [weak tab] image, _ in
-            DispatchQueue.main.async {
-                tab?.suspendedSnapshot = image
+            guard let image = image, let tab = tab else { return }
+            DispatchQueue.global(qos: .utility).async {
+                let dir = Tab.snapshotsDirectory
+                try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                let filePath = dir.appendingPathComponent("\(tabID.uuidString).jpg")
+
+                if let tiffData = image.tiffRepresentation,
+                   let bitmap = NSBitmapImageRep(data: tiffData),
+                   let jpegData = bitmap.representation(using: .jpeg, properties: [.compressionFactor: 0.7]) {
+                    try? jpegData.write(to: filePath)
+                    DispatchQueue.main.async {
+                        tab.snapshotPath = filePath
+                    }
+                }
             }
         }
 
@@ -314,7 +373,7 @@ class BrowserState: ObservableObject {
         // 3. Marcar como suspendida (la WebView se liberará)
         tab.isSuspended = true
 
-        print("💤 Tab suspendida: \(tab.title) - RAM liberada")
+        print("💤 Tab suspendida: \(tab.title) - RAM liberada (snapshot a disco)")
     }
 
     /// Restaura una tab suspendida
@@ -322,7 +381,13 @@ class BrowserState: ObservableObject {
         guard tab.isSuspended else { return }
 
         tab.isSuspended = false
-        tab.suspendedSnapshot = nil
+        // Eliminar snapshot de disco
+        if let path = tab.snapshotPath {
+            try? FileManager.default.removeItem(at: path)
+        }
+        tab.snapshotPath = nil
+        tab.recordInteraction()
+        AutoSuspendManager.shared.tabResumed(tab)
 
         // La WebView se recreará automáticamente en WebViewContainer
         // y cargará la URL guardada.
@@ -341,6 +406,11 @@ class BrowserState: ObservableObject {
     /// Cuenta tabs suspendidas
     var suspendedTabsCount: Int {
         tabs.filter { $0.isSuspended }.count
+    }
+
+    /// Cantidad de tabs auto-suspendidas por AutoSuspendManager
+    var autoSuspendedCount: Int {
+        AutoSuspendManager.shared.autoSuspendedCount
     }
 
     /// RAM estimada ahorrada por suspensión
@@ -654,9 +724,15 @@ class Tab: ObservableObject, Identifiable {
 
     // Tab Suspension
     @Published var isSuspended: Bool = false
-    @Published var suspendedSnapshot: NSImage?
+    @Published var snapshotPath: URL?
     @Published var lastInteraction: Date = Date()
     var scrollPosition: CGPoint = .zero
+
+    /// Directorio donde se guardan los snapshots de tabs suspendidas (JPEG)
+    static var snapshotsDirectory: URL {
+        let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first!
+        return caches.appendingPathComponent("MAI/snapshots", isDirectory: true)
+    }
 
     // CEF Hybrid Engine - true when tab uses Chromium (video conferencing)
     @Published var useChromiumEngine: Bool = false

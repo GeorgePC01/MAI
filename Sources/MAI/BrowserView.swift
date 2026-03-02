@@ -60,12 +60,130 @@ struct BrowserView: View {
                 WebViewContainer()
             }
 
+            // Banner de suspensión (si hay tab pendiente)
+            SuspensionBanner()
+
             // Barra de estado
             StatusBar()
         }
         .background(browserState.isIncognito
                     ? Color(red: 0.10, green: 0.10, blue: 0.12)
                     : Color(NSColor.windowBackgroundColor))
+        .sheet(isPresented: $browserState.showPhishingWarning) {
+            PhishingWarningView()
+                .environmentObject(browserState)
+        }
+    }
+}
+
+/// Diálogo de advertencia cuando se detecta phishing
+struct PhishingWarningView: View {
+    @EnvironmentObject var browserState: BrowserState
+
+    private var isDangerous: Bool {
+        if case .dangerous = browserState.phishingThreatLevel { return true }
+        return false
+    }
+
+    private var score: Double {
+        switch browserState.phishingThreatLevel {
+        case .safe: return 0
+        case .suspicious(let s, _): return s
+        case .dangerous(let s, _): return s
+        }
+    }
+
+    private var reasons: [String] {
+        switch browserState.phishingThreatLevel {
+        case .safe: return []
+        case .suspicious(_, let r): return r
+        case .dangerous(_, let r): return r
+        }
+    }
+
+    var body: some View {
+        VStack(spacing: 20) {
+            // Icono
+            Image(systemName: isDangerous ? "octagon.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size: 56))
+                .foregroundColor(isDangerous ? .red : .orange)
+
+            // Título
+            Text(isDangerous ? "Sitio Peligroso Detectado" : "Sitio Sospechoso Detectado")
+                .font(.title2)
+                .fontWeight(.bold)
+
+            // URL
+            Text(browserState.pendingPhishingURL)
+                .font(.system(size: 12, design: .monospaced))
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .padding(.horizontal)
+
+            // Puntuación de riesgo
+            HStack(spacing: 8) {
+                Text("Riesgo:")
+                    .fontWeight(.medium)
+                ProgressView(value: score, total: 1.0)
+                    .progressViewStyle(.linear)
+                    .tint(isDangerous ? .red : .orange)
+                    .frame(width: 100)
+                Text("\(Int(score * 100))%")
+                    .fontWeight(.bold)
+                    .foregroundColor(isDangerous ? .red : .orange)
+            }
+
+            // Lista de razones
+            if !reasons.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("Razones:")
+                        .fontWeight(.medium)
+                    ForEach(reasons, id: \.self) { reason in
+                        HStack(alignment: .top, spacing: 6) {
+                            Image(systemName: "exclamationmark.circle.fill")
+                                .foregroundColor(isDangerous ? .red : .orange)
+                                .font(.system(size: 12))
+                                .padding(.top, 2)
+                            Text(reason)
+                                .font(.system(size: 13))
+                        }
+                    }
+                }
+                .padding()
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(isDangerous
+                              ? Color.red.opacity(0.08)
+                              : Color.orange.opacity(0.08))
+                )
+            }
+
+            // Botones
+            HStack(spacing: 16) {
+                Button(action: { browserState.cancelPhishingNavigation() }) {
+                    HStack {
+                        Image(systemName: "arrow.uturn.backward")
+                        Text("Volver (Recomendado)")
+                    }
+                    .frame(minWidth: 180)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .keyboardShortcut(.defaultAction)
+
+                Button(action: { browserState.proceedToPhishingURL() }) {
+                    Text("Continuar de todos modos")
+                        .frame(minWidth: 160)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+                .foregroundColor(.secondary)
+            }
+        }
+        .padding(32)
+        .frame(width: 480)
     }
 }
 
@@ -333,7 +451,11 @@ struct StatusBar: View {
                 HStack(spacing: 4) {
                     Image(systemName: "moon.zzz.fill")
                         .foregroundColor(.orange)
-                    Text("\(browserState.suspendedTabsCount) suspendidas")
+                    if browserState.autoSuspendedCount > 0 {
+                        Text("\(browserState.suspendedTabsCount) suspendidas (\(browserState.autoSuspendedCount) auto)")
+                    } else {
+                        Text("\(browserState.suspendedTabsCount) suspendidas")
+                    }
                     Text("(-\(Int(browserState.estimatedRAMSaved)) MB)")
                         .foregroundColor(.green)
                 }
@@ -577,6 +699,61 @@ struct FindButtonStyle: ButtonStyle {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(configuration.isPressed ? Color.gray.opacity(0.3) : Color.clear)
             )
+    }
+}
+
+/// Banner que pregunta al usuario si quiere suspender una tab (modo aprendizaje)
+struct SuspensionBanner: View {
+    @ObservedObject private var autoSuspend = AutoSuspendManager.shared
+
+    var body: some View {
+        if let tab = autoSuspend.pendingSuspensionTab {
+            HStack(spacing: 10) {
+                Image(systemName: "brain.head.profile")
+                    .foregroundColor(.orange)
+                    .font(.system(size: 12))
+
+                Text("Suspender '\(tab.title)'?")
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+
+                Text("(\(autoSuspend.pendingSuspensionDomain))")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+
+                Spacer()
+
+                // "Sí" — botón prominente
+                Button(action: { autoSuspend.userApprovedSuspension() }) {
+                    Text("Sí")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.orange)
+                .controlSize(.mini)
+
+                // "No" — botón bordered
+                Button(action: { autoSuspend.userDeclinedSuspension() }) {
+                    Text("No")
+                        .font(.system(size: 11))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+
+                // "Siempre" — link morado
+                Button(action: { autoSuspend.userApprovedAlways() }) {
+                    Text("Siempre")
+                        .font(.system(size: 11))
+                        .foregroundColor(.purple)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Color.orange.opacity(0.08))
+            .transition(.move(edge: .bottom).combined(with: .opacity))
+        }
     }
 }
 

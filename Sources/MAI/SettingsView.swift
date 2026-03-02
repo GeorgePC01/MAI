@@ -84,6 +84,7 @@ struct GeneralSettingsView: View {
 struct PrivacySettingsView: View {
     @ObservedObject private var privacyManager = PrivacyManager.shared
     @ObservedObject private var easyListManager = EasyListManager.shared
+    @ObservedObject private var phishingDetector = PhishingDetector.shared
     @AppStorage("dnsOverHTTPS") private var dnsOverHTTPS = true
     @AppStorage("clearDataOnExit") private var clearDataOnExit = false
 
@@ -135,6 +136,15 @@ struct PrivacySettingsView: View {
                     }
                     .buttonStyle(.borderless)
                     .disabled(easyListManager.isLoading)
+                }
+            }
+
+            Section("Detección de Phishing") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Detectar URLs de phishing", isOn: $phishingDetector.isEnabled)
+                    Text("Analiza URLs con heurísticas para detectar suplantación de identidad y sitios fraudulentos")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
                 }
             }
 
@@ -240,18 +250,61 @@ struct AppearanceSettingsView: View {
 
 /// Configuración avanzada
 struct AdvancedSettingsView: View {
-    @AppStorage("enableMLPredictions") private var enableMLPredictions = true
+    @ObservedObject private var autoSuspend = AutoSuspendManager.shared
+    @ObservedObject private var mlModel = SuspensionMLModel.shared
     @AppStorage("enableHardwareAcceleration") private var enableHardwareAcceleration = true
     @AppStorage("maxMemoryPerTab") private var maxMemoryPerTab = 200.0
     @AppStorage("enableDeveloperTools") private var enableDeveloperTools = false
+    @State private var showResetAlert = false
 
     var body: some View {
         Form {
-            Section("Machine Learning") {
-                Toggle("Habilitar predicciones ML", isOn: $enableMLPredictions)
-                Text("Usa machine learning local para predecir navegación y optimizar recursos")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+            Section("Auto-Suspensión de Pestañas") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Suspender pestañas inactivas automáticamente", isOn: $autoSuspend.isEnabled)
+                    Text("Suspende pestañas no usadas para liberar ~70 MB de RAM por pestaña")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                if autoSuspend.isEnabled {
+                    HStack {
+                        Text("Umbral de inactividad: \(autoSuspend.thresholdMinutes) min")
+                        Slider(value: Binding(
+                            get: { Double(autoSuspend.thresholdMinutes) },
+                            set: { autoSuspend.thresholdMinutes = Int($0) }
+                        ), in: 5...60, step: 5)
+                    }
+
+                    VStack(alignment: .leading, spacing: 4) {
+                        Toggle("Modo de aprendizaje", isOn: $autoSuspend.learningModeEnabled)
+                        Text("Pregunta antes de suspender y aprende tus preferencias por dominio")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    if autoSuspend.learningModeEnabled {
+                        LabeledContent("Decisiones registradas", value: "\(mlModel.totalDecisions)")
+                        LabeledContent("Dominios aprendidos", value: "\(mlModel.learnedDomains)")
+
+                        Button("Reiniciar aprendizaje") {
+                            showResetAlert = true
+                        }
+                        .foregroundColor(.red)
+                        .alert("Reiniciar aprendizaje", isPresented: $showResetAlert) {
+                            Button("Cancelar", role: .cancel) { }
+                            Button("Reiniciar", role: .destructive) {
+                                mlModel.resetAll()
+                            }
+                        } message: {
+                            Text("Se borrarán todas las decisiones y estadísticas de suspensión. El modelo empezará a aprender de cero.")
+                        }
+                    }
+
+                    if autoSuspend.autoSuspendedCount > 0 {
+                        LabeledContent("Pestañas auto-suspendidas", value: "\(autoSuspend.autoSuspendedCount)")
+                    }
+                }
             }
 
             Section("Rendimiento") {
@@ -268,9 +321,9 @@ struct AdvancedSettingsView: View {
             }
 
             Section("Información") {
-                LabeledContent("Versión", value: "0.1.0-alpha")
-                LabeledContent("Motor", value: "WebKit")
-                LabeledContent("Build", value: "2026.02.06")
+                LabeledContent("Versión", value: "0.7.0-alpha")
+                LabeledContent("Motor", value: "WebKit + CEF")
+                LabeledContent("Build", value: "2026.02.28")
             }
         }
         .padding()

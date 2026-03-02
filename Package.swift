@@ -44,6 +44,7 @@ let package = Package(
                 .unsafeFlags(["-parse-as-library"])
             ],
             linkerSettings: [
+                .linkedFramework("CoreML"),
                 .unsafeFlags([
                     "-Xlinker", "-rpath",
                     "-Xlinker", "@executable_path/../Frameworks",
