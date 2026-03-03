@@ -220,6 +220,14 @@ class WebViewConfigurationManager {
             )
             config.userContentController.addUserScript(ytAdBlockScript)
 
+            // Script de limpieza post-carga (atDocumentEnd)
+            let ytCleanupScript = WKUserScript(
+                source: YouTubeAdBlockManager.shared.cleanupScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+            config.userContentController.addUserScript(ytCleanupScript)
+
             if let ytRuleList = YouTubeAdBlockManager.shared.compiledRuleList {
                 config.userContentController.add(ytRuleList)
             }
@@ -499,6 +507,12 @@ struct WebViewRepresentable: NSViewRepresentable {
             // Re-aplicar mute si el tab está silenciado
             if tab.isMuted {
                 browserState.applyMuteState(tab)
+            }
+
+            // YouTube: re-inyectar script de limpieza después de cada navegación
+            if YouTubeAdBlockManager.shared.blockYouTubeAds,
+               let host = webView.url?.host, host.contains("youtube.com") {
+                webView.evaluateJavaScript(YouTubeAdBlockManager.shared.cleanupScript) { _, _ in }
             }
         }
 
