@@ -105,73 +105,120 @@ class YouTubeAdBlockManager: ObservableObject {
 
     // MARK: - Capas 1-3: JavaScript injection
 
-    /// Script combinado de las 3 capas JS, solo se activa en youtube.com
+    /// Script combinado de las 3 capas JS, solo se activa en youtube.com.
+    /// Enfoque principal: eliminar datos de ads ANTES de que el player los procese,
+    /// y si un ad escapa, forzar skip inmediato (mute + 16x speed + click skip).
     var adBlockScript: String {
         return """
         (function() {
             if (!location.hostname.includes('youtube.com')) return;
 
-            // === CAPA 1: Interceptar datos de ads en JSON/fetch ===
-
-            // 1a. Override JSON.parse para limpiar ads de toda respuesta parseada
-            const _origParse = JSON.parse;
-            JSON.parse = function(text) {
-                const obj = _origParse.apply(this, arguments);
-                if (obj && typeof obj === 'object') {
-                    cleanAdFields(obj);
-                }
-                return obj;
+            var _notify = function(t) {
+                try { window.webkit.messageHandlers.youtubeAdBlocked.postMessage(t); } catch(e) {}
             };
-            // Preserve toString for detection avoidance
-            JSON.parse.toString = function() { return 'function parse() { [native code] }'; };
 
-            function cleanAdFields(obj) {
-                if (!obj || typeof obj !== 'object') return;
-                const adKeys = ['adPlacements', 'playerAds', 'adSlots', 'adBreakParams',
-                                'adBreakHeartbeatParams', 'instreamAdBreak'];
-                let cleaned = false;
-                for (const key of adKeys) {
-                    if (obj[key]) {
-                        delete obj[key];
+            // === CAPA 1: Interceptar y limpiar datos de ads ===
+
+            var _origParse = JSON.parse;
+
+            // Lista exhaustiva de claves de ads en playerResponse y respuestas API
+            var AD_KEYS = [
+                'adPlacements', 'playerAds', 'adSlots', 'adBreakParams',
+                'adBreakHeartbeatParams', 'instreamAdBreak', 'linearAdSequenceRenderer',
+                'adPlacementRenderer', 'actionCompanionAdRenderer', 'adVideoId',
+                'instreamAdPlayerOverlayRenderer', 'adLayoutLoggingData',
+                'instreamAdContentRenderer', 'prerollAdRenderer'
+            ];
+
+            // Limpieza recursiva profunda de campos de ads
+            function deepClean(obj, depth) {
+                if (!obj || typeof obj !== 'object' || depth > 12) return false;
+                var cleaned = false;
+                // Limpiar claves de ads de nivel superior
+                for (var i = 0; i < AD_KEYS.length; i++) {
+                    if (obj[AD_KEYS[i]] !== undefined) {
+                        delete obj[AD_KEYS[i]];
                         cleaned = true;
                     }
                 }
-                // Clean nested playerResponse
-                if (obj.playerResponse) cleanAdFields(obj.playerResponse);
-                if (obj.response) cleanAdFields(obj.response);
-                if (cleaned) {
-                    try { window.webkit.messageHandlers.youtubeAdBlocked.postMessage('cleaned'); } catch(e) {}
+                // Limpiar playerConfig.adConfig si existe
+                if (obj.playerConfig && obj.playerConfig.adConfig) {
+                    delete obj.playerConfig.adConfig;
+                    cleaned = true;
                 }
+                // Buscar recursivamente en objetos anidados conocidos
+                var nested = ['playerResponse', 'response', 'onResponseReceivedEndpoints',
+                              'engagementPanels', 'contents', 'results'];
+                for (var n = 0; n < nested.length; n++) {
+                    if (obj[nested[n]]) {
+                        if (Array.isArray(obj[nested[n]])) {
+                            for (var a = 0; a < obj[nested[n]].length; a++) {
+                                if (deepClean(obj[nested[n]][a], depth + 1)) cleaned = true;
+                            }
+                        } else {
+                            if (deepClean(obj[nested[n]], depth + 1)) cleaned = true;
+                        }
+                    }
+                }
+                return cleaned;
             }
 
-            // 1b. Trap ytInitialPlayerResponse to clean ads from initial page load
+            // 1a. Override JSON.parse — toda respuesta parseada pasa por aquí
+            JSON.parse = function() {
+                var obj = _origParse.apply(this, arguments);
+                if (obj && typeof obj === 'object') {
+                    if (deepClean(obj, 0)) _notify('json_clean');
+                }
+                return obj;
+            };
+            JSON.parse.toString = function() { return 'function parse() { [native code] }'; };
+
+            // 1b. Trap ytInitialPlayerResponse — blob inicial de la página
             try {
-                let _ytInitial = window.ytInitialPlayerResponse;
+                var _ytIPR = window.ytInitialPlayerResponse;
                 Object.defineProperty(window, 'ytInitialPlayerResponse', {
-                    get: function() { return _ytInitial; },
+                    get: function() { return _ytIPR; },
                     set: function(val) {
                         if (val && typeof val === 'object') {
-                            cleanAdFields(val);
+                            if (deepClean(val, 0)) _notify('initial_clean');
                         }
-                        _ytInitial = val;
+                        _ytIPR = val;
                     },
                     configurable: true
                 });
             } catch(e) {}
 
-            // 1c. Intercept fetch for player/next API responses
-            const _origFetch = window.fetch;
+            // 1c. Trap ytInitialData — datos iniciales de página con ads en feed
+            try {
+                var _ytID = window.ytInitialData;
+                Object.defineProperty(window, 'ytInitialData', {
+                    get: function() { return _ytID; },
+                    set: function(val) {
+                        if (val && typeof val === 'object') {
+                            deepClean(val, 0);
+                        }
+                        _ytID = val;
+                    },
+                    configurable: true
+                });
+            } catch(e) {}
+
+            // 1d. Intercept fetch — limpiar respuestas de player/next/ad_break
+            var _origFetch = window.fetch;
             window.fetch = function() {
-                const url = arguments[0];
-                const urlStr = (typeof url === 'string') ? url : (url && url.url ? url.url : '');
-                if (urlStr.includes('/youtubei/v1/player') || urlStr.includes('/youtubei/v1/next')) {
+                var url = arguments[0];
+                var urlStr = (typeof url === 'string') ? url : (url && url.url ? url.url : '');
+                var isAdEndpoint = urlStr.includes('/youtubei/v1/player')
+                    || urlStr.includes('/youtubei/v1/next')
+                    || urlStr.includes('/youtubei/v1/ad_break')
+                    || urlStr.includes('/youtubei/v1/browse');
+                if (isAdEndpoint) {
                     return _origFetch.apply(this, arguments).then(function(response) {
-                        const clone = response.clone();
-                        // Replace response body with cleaned version
+                        var clone = response.clone();
                         return clone.text().then(function(text) {
                             try {
-                                const data = _origParse(text);
-                                cleanAdFields(data);
+                                var data = _origParse(text);
+                                if (deepClean(data, 0)) _notify('fetch_clean');
                                 return new Response(JSON.stringify(data), {
                                     status: response.status,
                                     statusText: response.statusText,
@@ -186,84 +233,252 @@ class YouTubeAdBlockManager: ObservableObject {
                 return _origFetch.apply(this, arguments);
             };
 
-            // === CAPA 2: CSS cosmético — ocultar elementos de UI de ads ===
-            const style = document.createElement('style');
-            style.textContent = `
-                .ytp-ad-module,
-                .ytp-ad-overlay-container,
-                .ytp-ad-overlay-slot,
-                ytd-ad-slot-renderer,
-                ytd-banner-promo-renderer,
-                ytd-statement-banner-renderer,
-                ytd-in-feed-ad-layout-renderer,
-                ytd-promoted-sparkles-web-renderer,
-                ytd-promoted-sparkles-text-search-renderer,
-                ytd-display-ad-renderer,
-                ytd-companion-slot-renderer,
-                #masthead-ad,
-                #player-ads,
-                #panels > ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"],
-                ytd-merch-shelf-renderer,
-                .ytd-rich-item-renderer:has(ytd-ad-slot-renderer),
-                tp-yt-paper-dialog:has(.ytd-enforcement-message-view-model),
-                ytd-popup-container:has(.ytd-enforcement-message-view-model)
-                { display: none !important; }
-            `;
+            // 1e. Intercept XMLHttpRequest — YouTube usa XHR además de fetch
+            var _origXHROpen = XMLHttpRequest.prototype.open;
+            var _origXHRSend = XMLHttpRequest.prototype.send;
+            XMLHttpRequest.prototype.open = function(method, url) {
+                this._maiUrl = url || '';
+                return _origXHROpen.apply(this, arguments);
+            };
+            XMLHttpRequest.prototype.send = function() {
+                var self = this;
+                var url = self._maiUrl || '';
+                var isAdXHR = url.includes('/youtubei/v1/player')
+                    || url.includes('/youtubei/v1/next')
+                    || url.includes('/youtubei/v1/ad_break')
+                    || url.includes('get_midroll_info');
+                if (isAdXHR) {
+                    self.addEventListener('readystatechange', function() {
+                        if (self.readyState === 4) {
+                            try {
+                                var data = _origParse(self.responseText);
+                                if (deepClean(data, 0)) {
+                                    Object.defineProperty(self, 'responseText', {
+                                        get: function() { return JSON.stringify(data); }
+                                    });
+                                    Object.defineProperty(self, 'response', {
+                                        get: function() { return JSON.stringify(data); }
+                                    });
+                                    _notify('xhr_clean');
+                                }
+                            } catch(e) {}
+                        }
+                    });
+                }
+                return _origXHRSend.apply(this, arguments);
+            };
+
+            // 1f. Intercept Response.prototype.json — atrapa .json() en fetch responses
+            var _origResJson = Response.prototype.json;
+            Response.prototype.json = function() {
+                return _origResJson.apply(this, arguments).then(function(data) {
+                    if (data && typeof data === 'object') {
+                        if (deepClean(data, 0)) _notify('resp_json_clean');
+                    }
+                    return data;
+                });
+            };
+
+            // === CAPA 2: CSS cosmético ===
+            var style = document.createElement('style');
+            style.textContent = [
+                '.ytp-ad-module',
+                '.ytp-ad-overlay-container',
+                '.ytp-ad-overlay-slot',
+                '.ytp-ad-text-overlay',
+                '.ytp-ad-image-overlay',
+                '.ytp-ad-player-overlay',
+                '.ytp-ad-action-interstitial',
+                '.ytp-ad-skip-ad-slot',
+                'ytd-ad-slot-renderer',
+                'ytd-banner-promo-renderer',
+                'ytd-statement-banner-renderer',
+                'ytd-in-feed-ad-layout-renderer',
+                'ytd-promoted-sparkles-web-renderer',
+                'ytd-promoted-sparkles-text-search-renderer',
+                'ytd-display-ad-renderer',
+                'ytd-companion-slot-renderer',
+                'ytd-player-legacy-desktop-watch-ads-renderer',
+                '#masthead-ad',
+                '#player-ads',
+                '#panels > ytd-engagement-panel-section-list-renderer[target-id="engagement-panel-ads"]',
+                'ytd-merch-shelf-renderer',
+                '.ytd-rich-item-renderer:has(ytd-ad-slot-renderer)',
+                'tp-yt-paper-dialog:has(.ytd-enforcement-message-view-model)',
+                'ytd-popup-container:has(.ytd-enforcement-message-view-model)',
+                '.ad-interrupting',
+                '.ad-showing .ytp-ad-overlay-container'
+            ].join(',') + '{ display: none !important; }';
             (document.head || document.documentElement).appendChild(style);
 
-            // === CAPA 3: MutationObserver auto-skip fallback ===
-            function skipAd() {
-                const player = document.querySelector('.html5-video-player');
+            // === CAPA 3: Detección activa + skip forzado de ads incrustados ===
+
+            var _adActive = false;
+
+            function forceSkipAd() {
+                var player = document.querySelector('.html5-video-player');
                 if (!player) return;
-                if (player.classList.contains('ad-showing')) {
-                    // Try clicking skip button
-                    const skipBtn = document.querySelector('.ytp-skip-ad-button, .ytp-ad-skip-button, .ytp-ad-skip-button-modern, button[class*="skip"]');
-                    if (skipBtn) {
-                        skipBtn.click();
-                        try { window.webkit.messageHandlers.youtubeAdBlocked.postMessage('skipped'); } catch(e) {}
+
+                var isAd = player.classList.contains('ad-showing')
+                    || player.classList.contains('ad-interrupting')
+                    || document.querySelector('.ytp-ad-player-overlay');
+
+                if (!isAd) {
+                    // Si estábamos en ad y ya no, restaurar estado
+                    if (_adActive) {
+                        _adActive = false;
+                        var v = document.querySelector('video');
+                        if (v) {
+                            v.muted = false;
+                            v.playbackRate = 1;
+                        }
+                    }
+                    return;
+                }
+
+                _adActive = true;
+
+                // 3a. Intentar click en todos los botones de skip conocidos
+                var skipSelectors = [
+                    '.ytp-skip-ad-button',
+                    '.ytp-ad-skip-button',
+                    '.ytp-ad-skip-button-modern',
+                    '.ytp-ad-skip-button-slot button',
+                    'button.ytp-ad-overlay-close-button',
+                    '.ytp-ad-survey-answer-button',
+                    '[id^="skip-button"]',
+                    'button[data-tooltip-target-id="a]d-skip-button"]'
+                ];
+                for (var s = 0; s < skipSelectors.length; s++) {
+                    var btn = document.querySelector(skipSelectors[s]);
+                    if (btn) {
+                        btn.click();
+                        _notify('skip_click');
                         return;
                     }
-                    // Force skip by jumping to end
-                    const video = document.querySelector('video');
-                    if (video && video.duration && isFinite(video.duration)) {
-                        video.currentTime = video.duration;
-                        try { window.webkit.messageHandlers.youtubeAdBlocked.postMessage('forced_skip'); } catch(e) {}
+                }
+
+                // 3b. Forzar skip: mute + velocidad máxima + saltar al final
+                var video = document.querySelector('video');
+                if (video) {
+                    video.muted = true;
+                    // Velocidad máxima para pasar el ad lo más rápido posible
+                    try { video.playbackRate = 16; } catch(e) {
+                        try { video.playbackRate = 8; } catch(e2) {}
+                    }
+                    // Si tiene duración finita, saltar al final
+                    if (video.duration && isFinite(video.duration) && video.duration > 0) {
+                        video.currentTime = video.duration - 0.1;
+                        _notify('jump_end');
                     }
                 }
+
+                // 3c. Intentar usar la API interna del player de YouTube
+                try {
+                    var ytPlayer = document.getElementById('movie_player');
+                    if (ytPlayer) {
+                        // skipAd() es método interno del player
+                        if (typeof ytPlayer.skipAd === 'function') {
+                            ytPlayer.skipAd();
+                            _notify('api_skip');
+                        }
+                        // cancelPlayback detiene el ad
+                        if (typeof ytPlayer.cancelPlayback === 'function' && isAd) {
+                            // Solo si realmente es un ad (no el video principal)
+                            var adState = ytPlayer.getAdState ? ytPlayer.getAdState() : -1;
+                            if (adState > 0) {
+                                ytPlayer.cancelPlayback();
+                                _notify('api_cancel');
+                            }
+                        }
+                    }
+                } catch(e) {}
             }
 
-            // Observe player class changes for ad-showing
-            const observer = new MutationObserver(function(mutations) {
-                for (const m of mutations) {
+            // MutationObserver para reaccionar a cambios de clase del player
+            var observer = new MutationObserver(function(mutations) {
+                for (var i = 0; i < mutations.length; i++) {
+                    var m = mutations[i];
                     if (m.type === 'attributes' && m.attributeName === 'class') {
-                        skipAd();
+                        forceSkipAd();
                     }
-                    // Also check for new ad nodes
                     if (m.type === 'childList' && m.addedNodes.length > 0) {
-                        for (const node of m.addedNodes) {
-                            if (node.nodeType === 1 && (
-                                node.tagName === 'YTD-AD-SLOT-RENDERER' ||
-                                node.classList?.contains('ytp-ad-module')
-                            )) {
-                                node.remove();
-                                try { window.webkit.messageHandlers.youtubeAdBlocked.postMessage('removed_node'); } catch(e) {}
+                        for (var j = 0; j < m.addedNodes.length; j++) {
+                            var node = m.addedNodes[j];
+                            if (node.nodeType === 1) {
+                                var tag = node.tagName ? node.tagName.toLowerCase() : '';
+                                if (tag === 'ytd-ad-slot-renderer' ||
+                                    tag === 'ytd-promoted-sparkles-web-renderer' ||
+                                    (node.classList && node.classList.contains('ytp-ad-module'))) {
+                                    node.remove();
+                                    _notify('node_rm');
+                                }
                             }
                         }
                     }
                 }
             });
 
-            // Start observing once player is available
+            // Polling de seguridad: cada 500ms verificar si hay un ad reproduciéndose
+            // (el MutationObserver a veces no detecta cambios de clase internos)
+            var _pollInterval = null;
+            function startAdPoll() {
+                if (_pollInterval) return;
+                _pollInterval = setInterval(function() {
+                    forceSkipAd();
+                }, 500);
+            }
+
+            // Interceptar 'playing' en el video para detectar ads que escaparon
+            function hookVideoEvents() {
+                var video = document.querySelector('video');
+                if (!video || video._maiHooked) return;
+                video._maiHooked = true;
+                video.addEventListener('playing', function() {
+                    // Verificar si es un ad
+                    setTimeout(forceSkipAd, 50);
+                });
+                video.addEventListener('loadstart', function() {
+                    setTimeout(forceSkipAd, 100);
+                });
+            }
+
             function attachObserver() {
-                const player = document.querySelector('.html5-video-player');
+                var player = document.querySelector('.html5-video-player');
                 if (player) {
                     observer.observe(player, { attributes: true, childList: true, subtree: true });
-                    // Also observe body for feed ads
                     observer.observe(document.body, { childList: true, subtree: true });
+                    hookVideoEvents();
+                    startAdPoll();
+                    // Check immediately
+                    forceSkipAd();
                 } else {
-                    setTimeout(attachObserver, 1000);
+                    setTimeout(attachObserver, 500);
                 }
             }
+
+            // Re-attach on YouTube SPA navigation (pushState/popState)
+            var _origPushState = history.pushState;
+            history.pushState = function() {
+                _origPushState.apply(this, arguments);
+                setTimeout(function() {
+                    hookVideoEvents();
+                    forceSkipAd();
+                }, 1000);
+            };
+            window.addEventListener('popstate', function() {
+                setTimeout(function() {
+                    hookVideoEvents();
+                    forceSkipAd();
+                }, 1000);
+            });
+            // yt-navigate-finish fires on YouTube SPA page transitions
+            window.addEventListener('yt-navigate-finish', function() {
+                setTimeout(function() {
+                    hookVideoEvents();
+                    forceSkipAd();
+                }, 500);
+            });
 
             if (document.readyState === 'loading') {
                 document.addEventListener('DOMContentLoaded', attachObserver);
