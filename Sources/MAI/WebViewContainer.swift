@@ -211,31 +211,86 @@ class WebViewConfigurationManager {
             }
         }
 
+        // YouTube ad blocking: JS injection + network rules
+        if YouTubeAdBlockManager.shared.blockYouTubeAds {
+            let ytAdBlockScript = WKUserScript(
+                source: YouTubeAdBlockManager.shared.adBlockScript,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            )
+            config.userContentController.addUserScript(ytAdBlockScript)
+
+            if let ytRuleList = YouTubeAdBlockManager.shared.compiledRuleList {
+                config.userContentController.add(ytRuleList)
+            }
+        }
+
         return config
     }
 
-    /// Script mínimo para compatibilidad - solo oculta webdriver flag
-    /// No modifica plugins, languages ni platform para evitar romper
-    /// fingerprinting de seguridad en portales empresariales
+    /// Script que detecta el UA para decidir si spoofear como Safari o Chrome.
+    /// Si el UA contiene "Chrome/" → inyecta propiedades de Chrome (compat mode).
+    /// Si no → oculta rastros de Chrome (modo Safari normal).
     private static let navigatorSpoofingScript = """
     (function() {
-        // Ocultar detección de WebDriver (WKWebView lo expone)
+        // Ocultar webdriver en ambos modos
         Object.defineProperty(navigator, 'webdriver', {
             get: () => false,
             configurable: true
         });
 
-        // Ocultar userAgentData (Chrome-specific, Safari no lo tiene)
-        if (navigator.userAgentData !== undefined) {
-            Object.defineProperty(navigator, 'userAgentData', {
-                get: () => undefined,
+        var isChrome = navigator.userAgent.indexOf('Chrome/') !== -1
+            && navigator.userAgent.indexOf('Safari/537.36') !== -1;
+
+        if (isChrome) {
+            // MODO CHROME: inyectar propiedades de Chrome
+            if (!window.chrome) {
+                window.chrome = {
+                    runtime: {},
+                    loadTimes: function() { return {}; },
+                    csi: function() { return {}; }
+                };
+            }
+            if (!navigator.userAgentData) {
+                Object.defineProperty(navigator, 'userAgentData', {
+                    get: () => ({
+                        brands: [
+                            { brand: "Chromium", version: "145" },
+                            { brand: "Google Chrome", version: "145" },
+                            { brand: "Not-A.Brand", version: "99" }
+                        ],
+                        mobile: false,
+                        platform: "macOS",
+                        getHighEntropyValues: function(hints) {
+                            return Promise.resolve({
+                                brands: this.brands,
+                                mobile: false,
+                                platform: "macOS",
+                                platformVersion: "15.0.0",
+                                architecture: "arm",
+                                model: "",
+                                uaFullVersion: "145.0.7632.68"
+                            });
+                        }
+                    }),
+                    configurable: true
+                });
+            }
+            Object.defineProperty(navigator, 'vendor', {
+                get: () => 'Google Inc.',
                 configurable: true
             });
-        }
-
-        // Eliminar rastros de Chrome si existen
-        if (window.chrome !== undefined) {
-            delete window.chrome;
+        } else {
+            // MODO SAFARI: ocultar rastros de Chrome
+            if (navigator.userAgentData !== undefined) {
+                Object.defineProperty(navigator, 'userAgentData', {
+                    get: () => undefined,
+                    configurable: true
+                });
+            }
+            if (window.chrome !== undefined) {
+                delete window.chrome;
+            }
         }
     })();
     """
@@ -270,6 +325,11 @@ struct WebViewRepresentable: NSViewRepresentable {
         // Usar configuración compartida (incógnito usa data store no-persistente)
         let config = WebViewConfigurationManager.shared.createConfiguration(isIncognito: tab.isIncognito)
 
+        // Register YouTube ad block message handler
+        if YouTubeAdBlockManager.shared.blockYouTubeAds {
+            config.userContentController.add(context.coordinator, name: "youtubeAdBlocked")
+        }
+
         // Crear WebView con configuración compartida
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -280,9 +340,16 @@ struct WebViewRepresentable: NSViewRepresentable {
         // Forzar que WKWebView siga el tema del sistema (no heredar de la app)
         webView.underPageBackgroundColor = NSColor.textBackgroundColor
 
-        // User-Agent de Safari 18.2 (macOS Sequoia) para compatibilidad con Google
-        // Usar formato estándar que Google reconoce
-        webView.customUserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.2 Safari/605.1.15"
+        // Check if this domain has Chrome compat mode saved
+        let useChromeCompat = BrowserState.shouldUseChromeCompat(for: tab.url)
+        if useChromeCompat {
+            tab.chromeCompatMode = true
+        }
+
+        // User-Agent: Chrome 145 if compat mode, Safari 18.2 otherwise
+        webView.customUserAgent = tab.chromeCompatMode
+            ? ChromeCompatManager.chromeUserAgent
+            : ChromeCompatManager.safariUserAgent
 
         // Guardar referencia en el tab
         tab.webView = webView
@@ -308,7 +375,7 @@ struct WebViewRepresentable: NSViewRepresentable {
     }
 
     /// Coordinator para manejar delegados de WKWebView
-    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
+    class Coordinator: NSObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate, WKScriptMessageHandler {
         var tab: Tab
         var browserState: BrowserState
         private var observations: [NSKeyValueObservation] = []
@@ -321,6 +388,14 @@ struct WebViewRepresentable: NSViewRepresentable {
 
         deinit {
             observations.forEach { $0.invalidate() }
+        }
+
+        // MARK: - WKScriptMessageHandler (YouTube Ad Block)
+
+        func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
+            if message.name == "youtubeAdBlocked" {
+                YouTubeAdBlockManager.shared.incrementAdsBlocked()
+            }
         }
 
         func setupObservers(for webView: WKWebView) {

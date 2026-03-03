@@ -230,6 +230,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 await EasyListManager.shared.loadFilterLists()
             }
         }
+
+        // Pre-compile YouTube ad block rules
+        if YouTubeAdBlockManager.shared.blockYouTubeAds {
+            Task {
+                await YouTubeAdBlockManager.shared.compileNetworkRules()
+            }
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
