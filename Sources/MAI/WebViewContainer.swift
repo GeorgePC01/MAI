@@ -330,6 +330,17 @@ struct WebViewRepresentable: NSViewRepresentable {
     @ObservedObject var browserState: BrowserState
 
     func makeNSView(context: Context) -> WKWebView {
+        // Reutilizar webView existente (transferencia entre ventanas)
+        if let existingWebView = tab.retainedWebView ?? tab.webView {
+            existingWebView.removeFromSuperview()
+            existingWebView.navigationDelegate = context.coordinator
+            existingWebView.uiDelegate = context.coordinator
+            tab.webView = existingWebView
+            tab.retainedWebView = nil // Liberar referencia strong
+            context.coordinator.setupObservers(for: existingWebView)
+            return existingWebView
+        }
+
         // Usar configuración compartida (incógnito usa data store no-persistente)
         let config = WebViewConfigurationManager.shared.createConfiguration(isIncognito: tab.isIncognito)
 
@@ -526,6 +537,13 @@ struct WebViewRepresentable: NSViewRepresentable {
             tab.isLoading = false
             browserState.isLoading = false
             print("Provisional navigation failed: \(error.localizedDescription)")
+        }
+
+        func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+            print("⚠️ WebContent process terminated for tab: \(tab.title ?? "unknown") - reloading")
+            tab.isLoading = true
+            browserState.isLoading = true
+            webView.reload()
         }
 
         func webView(_ webView: WKWebView, decidePolicyFor navigationAction: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {

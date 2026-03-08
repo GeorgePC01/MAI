@@ -47,6 +47,12 @@ struct BrowserView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            // Indicador de modo Chrome compat (WebKit con identidad Chrome)
+            if browserState.currentTab?.chromeCompatMode == true && !browserState.isCurrentTabChromium {
+                ChromeCompatIndicator()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // Contenido principal
             HStack(spacing: 0) {
                 // Sidebar opcional
@@ -72,6 +78,12 @@ struct BrowserView: View {
         .sheet(isPresented: $browserState.showPhishingWarning) {
             PhishingWarningView()
                 .environmentObject(browserState)
+        }
+        .onAppear {
+            // Registrar ventana principal en WindowManager para soporte de merge tabs
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                WindowManager.shared.registerMainWindow(state: browserState)
+            }
         }
     }
 }
@@ -758,6 +770,43 @@ struct SuspensionBanner: View {
 }
 
 /// Indicador sutil cuando un tab usa Chromium engine (CEF) para videoconferencias
+struct ChromeCompatIndicator: View {
+    @EnvironmentObject var browserState: BrowserState
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "globe.americas")
+                .foregroundColor(.blue)
+                .font(.system(size: 11))
+
+            Text("Modo Chrome")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(.blue)
+
+            Text("- Identidad Chrome en WebKit")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+                .lineLimit(1)
+
+            Spacer()
+
+            Button(action: {
+                if let tab = browserState.currentTab {
+                    browserState.toggleChromeCompatMode(tab)
+                }
+            }) {
+                Text("Desactivar")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.blue)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(Color.blue.opacity(0.08))
+    }
+}
+
 struct ChromiumEngineIndicator: View {
     @EnvironmentObject var browserState: BrowserState
 
