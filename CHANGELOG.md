@@ -10,11 +10,11 @@ Investigación de mercado (2025-2026): features que usuarios piden y ningún bro
 
 | # | Feature | Esfuerzo | Impacto | Estado |
 |---|---------|----------|---------|--------|
-| 1 | **Auto-rechazo cookie banners + GPC** | Medio | Muy Alto | ⏳ |
-| 2 | **Búsqueda full-text en historial** | Medio | Muy Alto | ⏳ |
-| 3 | **Workspaces con contextos aislados** | Alto | Muy Alto | ⏳ |
-| 4 | **Traducción de páginas** | Medio | Alto | ⏳ |
-| 5 | **Animación + sonido al cerrar tab ML** | Bajo | Medio | ⏳ |
+| 1 | **Auto-rechazo cookie banners + GPC** | Medio | Muy Alto | ✅ v0.9.1 |
+| 2 | **Búsqueda full-text en historial** | Medio | Muy Alto | ✅ v0.9.1 |
+| 3 | **Workspaces con contextos aislados** | Alto | Muy Alto | ✅ v0.9.2 |
+| 4 | **Traducción de páginas** | Medio | Alto | ✅ v0.9.2 |
+| 5 | **Animación + sonido al cerrar tab ML** | Bajo | Medio | ✅ v0.9.2 |
 | 6 | **Sesiones crash-proof** | Bajo | Alto | ⏳ |
 | 7 | **Anotaciones web nativas** | Medio | Alto | ⏳ |
 | 8 | **Modo Focus** | Bajo | Alto | ⏳ |
@@ -24,12 +24,61 @@ Investigación de mercado (2025-2026): features que usuarios piden y ningún bro
 | 12 | **Anti-fingerprinting real** | Alto | Alto | ⏳ |
 | 13 | **Tab intelligence** (duplicados, auto-archive, búsqueda) | Bajo | Medio | ⏳ |
 | 14 | **Data portability** (export JSON/SQLite) | Bajo | Medio | ⏳ |
-| 15 | **PDFs → Preview.app** (no renderizar in-browser) | Bajo | Medio | ⏳ |
+| 15 | **PDFs → Preview.app** (no renderizar in-browser) | Bajo | Medio | ✅ v0.9.2 |
 
 ### Decisiones
 - **PDFs**: No renderizar en browser. Detectar → descargar a /tmp → abrir con Preview.app (NSWorkspace). Cero overhead.
 - **v1.0**: Features 1-5 + landing page + notarización = listo para público
 - **Versioning**: +0.0.1 por sesión/feature, v1.0 para release público
+
+---
+
+## v0.9.2 (2026-03-09) — Google Suggest, Translation, ML Banner Animation, PDFs → Preview
+
+### Google Suggest Mejorado (AddressBar.swift)
+- **Endpoint**: Cambiado de `client=chrome-omni` (8 resultados) a `client=chrome` (15 resultados) — mismo que Chrome real
+- **Más sugerencias**: Dropdown muestra hasta 10 resultados (antes 8)
+- **NAVIGATION display**: URLs directas (linkedin.com, yahoo.com) muestran dominio limpio como título
+
+### Animación + Sonido en Banner ML (BrowserView.swift)
+- **Sonido**: `NSSound.beep()` al aparecer el banner de suspensión
+- **Pulse ícono**: 3 pulsos de escala (1.0 → 1.3) en el ícono del cerebro
+- **Glow borde**: Borde naranja que pulsa 2 veces y se desvanece
+- **Reset**: Animaciones se resetean después de 1.8s
+
+### Traducción de Páginas (TranslationManager.swift — NUEVO)
+- **API**: Google Translate endpoint gratuito (`translate.googleapis.com/translate_a/single?client=gtx`, sin API key)
+- **Detección automática**: Extrae 500 chars de texto visible → detecta idioma → muestra banner azul si es diferente al target
+- **Traducción batch**: Recolecta nodos de texto DOM → traduce en batches de 20 → reemplaza in-place preservando HTML
+- **30 idiomas**: es, en, fr, de, it, pt, ja, ko, zh, ru, ar, hi, nl, pl, tr, sv, da, no, fi, el, he, th, vi, id, ms, uk, cs, ro, hu, ca
+- **Banner**: Barra azul "Página en [idioma] — Traducir a [target]" con ProgressView durante traducción
+- **Settings**: Toggle habilitar, selector idioma target, contador páginas traducidas
+- **Atajo**: Cmd+Shift+T para traducir manualmente
+- **Reset**: Estado se resetea al cambiar de tab (BrowserState.selectTab)
+- **Archivos**: TranslationManager.swift (nuevo), WebViewContainer.swift, BrowserView.swift, SettingsView.swift, MAIApp.swift, BrowserState.swift
+
+### PDFs → Preview.app (WebViewContainer.swift)
+- **Intercepta** `application/pdf` en `decidePolicyFor navigationResponse`
+- **Descarga** a `/tmp` con `URLSession` (no renderiza in-browser)
+- **Abre** con `NSWorkspace.shared.open()` → Preview.app por defecto
+- **Cancela** navegación en browser (cero overhead de memoria)
+
+### Workspaces con Contextos Aislados (WorkspaceManager.swift — NUEVO)
+- **Data store**: `WKWebsiteDataStore(forIdentifier: uuid)` (macOS 14+) — cookies, cache, localStorage completamente aislados por workspace
+- **Modelo**: `Workspace` (Codable) con id, name, colorHex, icon (SF Symbol)
+- **Persistencia**: JSON en `~/Library/Application Support/MAI/workspaces.json`
+- **UI**: `WorkspaceBar` con chips de color encima del TabBar, click abre ventana con ese workspace
+- **Crear**: Sheet con nombre, selector 8 colores, selector 12 íconos
+- **Editar/Eliminar**: Click derecho en chip, workspace "Personal" no eliminable
+- **Título ventana**: "MAI Browser — [Workspace Name]"
+- **Integración**: BrowserState.workspaceID → WebViewConfigurationManager.createConfiguration(workspaceID:)
+- **Fallback macOS 13**: Organización visual sin aislamiento real
+- **Archivos**: WorkspaceManager.swift (nuevo), BrowserState.swift, WebViewContainer.swift, BrowserView.swift, MAIApp.swift
+
+### Archivos modificados
+- `AddressBar.swift`: client=chrome, 10 resultados, NAVIGATION display
+- `BrowserView.swift`: SuspensionBanner con animación pulse + glow + sonido
+- `WebViewContainer.swift`: PDF intercept + openPDFInPreview()
 
 ---
 

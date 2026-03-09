@@ -24,6 +24,9 @@ class BrowserState: ObservableObject {
     // Incognito window — all tabs inherit this mode
     let isIncognito: Bool
 
+    // Workspace — contexto aislado de navegación (cookies, cache, localStorage)
+    let workspaceID: UUID
+
     enum SidebarTab: String, CaseIterable {
         case bookmarks = "Favoritos"
         case history = "Historial"
@@ -69,8 +72,9 @@ class BrowserState: ObservableObject {
 
     // MARK: - Initialization
 
-    init(isIncognito: Bool = false) {
+    init(isIncognito: Bool = false, workspaceID: UUID? = nil) {
         self.isIncognito = isIncognito
+        self.workspaceID = workspaceID ?? WorkspaceManager.shared.activeWorkspaceID
         // Crear pestaña inicial (hereda modo incógnito de la ventana)
         let tab = Tab(url: "about:blank", isIncognito: isIncognito)
         tabs.append(tab)
@@ -130,6 +134,7 @@ class BrowserState: ObservableObject {
         currentTab?.recordInteraction() // Marca actividad en el tab que dejamos
         currentTabIndex = index
         tabs[index].recordInteraction()
+        TranslationManager.shared.resetState()
     }
 
     func moveTab(from source: IndexSet, to destination: Int) {
@@ -265,22 +270,44 @@ class BrowserState: ObservableObject {
             return
         }
 
-        if shouldUseChromium {
-            // CEF is a singleton — only one Chromium browser at a time.
-            // If another tab already uses Chromium, reuse it.
-            // All video conferencing (Meet/Zoom/Teams) uses embedded Alloy mode.
-            // Standalone mode removed — parent_view forces Alloy anyway, and
-            // a separate window breaks Microsoft auth cookie flow.
+        if shouldUseChromium && !tab.forceWebKit {
+            // CEF es singleton — solo un browser Chromium a la vez.
+            // Si ya hay una reunión activa, avisar al usuario en vez de reemplazar silenciosamente.
             if let existingCEFTab = tabs.first(where: { $0.useChromiumEngine }),
                let cefIndex = tabs.firstIndex(where: { $0.id == existingCEFTab.id }) {
-                print("🔄 Reusing existing Chromium tab for: \(finalURL)")
-                CEFBridge.loadURL(finalURL)
-                existingCEFTab.url = finalURL
-                existingCEFTab.title = "Loading..."
-                currentTabIndex = cefIndex
-                return
+
+                let existingService = Self.videoConferenceServiceName(for: existingCEFTab.url)
+                let newService = Self.videoConferenceServiceName(for: finalURL)
+
+                let alert = NSAlert()
+                alert.messageText = "Reunión activa en \(existingService)"
+                alert.informativeText = "¿Qué deseas hacer con la reunión de \(newService)?\n\n• Reemplazar: Cierra \(existingService) y abre \(newService) con experiencia completa.\n\n• Modo nativo: Mantiene tu reunión actual y abre \(newService). Algunas funciones avanzadas podrían tener limitaciones."
+                alert.addButton(withTitle: "Reemplazar reunión")
+                alert.addButton(withTitle: "Abrir en modo nativo")
+                alert.addButton(withTitle: "Cancelar")
+                alert.alertStyle = .informational
+
+                let response = alert.runModal()
+                if response == .alertFirstButtonReturn {
+                    // Reemplazar: navegar en el tab CEF existente
+                    print("🔄 Usuario reemplazó reunión: \(existingService) → \(newService)")
+                    CEFBridge.loadURL(finalURL)
+                    existingCEFTab.url = finalURL
+                    existingCEFTab.title = "Cargando..."
+                    currentTabIndex = cefIndex
+                    return
+                } else if response == .alertSecondButtonReturn {
+                    // Abrir en WebKit: audio/video funciona, sin compartir pantalla HD
+                    print("🌐 Abriendo \(newService) en modo nativo (reunión activa en \(existingService))")
+                    tab.forceWebKit = true
+                    tab.navigate(to: finalURL)
+                    return
+                } else {
+                    // Cancelar
+                    return
+                }
             }
-            // No existing CEF tab — switch this tab to Chromium
+            // No hay reunión activa — abrir normalmente en Chromium
             tab.useChromiumEngine = true
             tab.useStandaloneChromium = false
             print("🔄 Switching to Chromium engine for: \(finalURL)")
@@ -673,14 +700,19 @@ class BrowserState: ObservableObject {
         currentTab?.useChromiumEngine ?? false
     }
 
-    /// Nombre del servicio de videoconferencia actual
-    var videoConferenceServiceName: String {
-        guard let url = currentTab?.url,
-              let host = URL(string: url)?.host?.lowercased() else { return "" }
+    /// Nombre del servicio de videoconferencia para una URL dada
+    static func videoConferenceServiceName(for urlString: String) -> String {
+        guard let host = URL(string: urlString)?.host?.lowercased() else { return "Videoconferencia" }
         if host.contains("meet.google") { return "Google Meet" }
         if host.contains("zoom") { return "Zoom" }
         if host.contains("teams") { return "Microsoft Teams" }
         return "Videoconferencia"
+    }
+
+    /// Nombre del servicio de videoconferencia actual
+    var videoConferenceServiceName: String {
+        guard let url = currentTab?.url else { return "" }
+        return Self.videoConferenceServiceName(for: url)
     }
 
     // MARK: - Zoom
@@ -765,6 +797,8 @@ class Tab: ObservableObject, Identifiable {
     @Published var useChromiumEngine: Bool = false
     // True when Teams uses standalone Chrome-style window (for screen sharing)
     @Published var useStandaloneChromium: Bool = false
+    // User chose to open video conference in WebKit (skip CEF auto-detection)
+    var forceWebKit: Bool = false
 
     // Incognito mode - no history, non-persistent cookies/cache
     let isIncognito: Bool

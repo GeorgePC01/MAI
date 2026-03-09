@@ -64,6 +64,36 @@ struct GeneralSettingsView: View {
                 Toggle("Abrir links en nueva pestaña", isOn: .constant(true))
                 Toggle("Confirmar al cerrar múltiples pestañas", isOn: .constant(true))
             }
+
+            Section("Traducción") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Ofrecer traducir páginas en otro idioma", isOn: Binding(
+                        get: { TranslationManager.shared.isEnabled },
+                        set: { TranslationManager.shared.isEnabled = $0 }
+                    ))
+                    Text("Detecta automáticamente el idioma y ofrece traducir al idioma seleccionado")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                Picker("Traducir a", selection: Binding(
+                    get: { TranslationManager.shared.targetLanguage },
+                    set: { TranslationManager.shared.targetLanguage = $0 }
+                )) {
+                    ForEach(TranslationManager.supportedLanguages, id: \.code) { lang in
+                        Text(lang.name).tag(lang.code)
+                    }
+                }
+
+                HStack {
+                    Label("\(TranslationManager.shared.pagesTranslated) páginas traducidas", systemImage: "globe")
+                    Spacer()
+                    Button("Reiniciar") {
+                        TranslationManager.shared.resetCount()
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
         }
         .padding()
     }

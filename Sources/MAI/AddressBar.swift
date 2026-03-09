@@ -215,7 +215,7 @@ struct AddressBar: View {
         }
 
         // Mostrar locales inmediatamente
-        suggestions = Array(results.prefix(8))
+        suggestions = Array(results.prefix(10))
         showSuggestions = !suggestions.isEmpty
         selectedSuggestionIndex = -1
 
@@ -238,10 +238,10 @@ struct AddressBar: View {
 
     @MainActor
     private func fetchGoogleSuggestions(query: String, localResults: [URLSuggestion], seenKeys: Set<String>) async {
-        // Chrome Omnibox endpoint (same as real Chrome) — richer results than suggestqueries.google.com
+        // Chrome Suggest endpoint — client=chrome returns 15 results (vs 8 for chrome-omni)
         let lang = Locale.current.language.languageCode?.identifier ?? "es"
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://www.google.com/complete/search?client=chrome-omni&q=\(encoded)&hl=\(lang)") else { return }
+              let url = URL(string: "https://www.google.com/complete/search?client=chrome&q=\(encoded)&hl=\(lang)") else { return }
 
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
@@ -287,10 +287,20 @@ struct AddressBar: View {
 
                 switch type {
                 case "NAVIGATION":
-                    // URL directa con descripción del sitio
-                    let title = description.isEmpty ? s : description
+                    // URL directa (ej: https://linkedin.com) — mostrar dominio limpio como título
+                    let title: String
+                    if !description.isEmpty {
+                        title = description
+                    } else {
+                        // Extraer dominio limpio como título
+                        var domain = s
+                        domain = domain.replacingOccurrences(of: "https://", with: "")
+                        domain = domain.replacingOccurrences(of: "http://", with: "")
+                        if domain.hasSuffix("/") { domain = String(domain.dropLast()) }
+                        title = domain
+                    }
                     googleResults.append((
-                        URLSuggestion(url: s, title: title, source: .bookmark),
+                        URLSuggestion(url: s, title: title, source: .history),
                         relevance
                     ))
                 case "CALCULATOR":
@@ -314,7 +324,7 @@ struct AddressBar: View {
 
             // Combinar: locales primero (máx 3), luego Google por relevancia
             var combined = Array(localResults.prefix(3))
-            let remainingSlots = 8 - combined.count
+            let remainingSlots = 10 - combined.count
             combined.append(contentsOf: googleResults.prefix(remainingSlots).map(\.suggestion))
 
             suggestions = combined
@@ -648,6 +658,18 @@ struct AddressTextField: NSViewRepresentable {
         func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
             if commandSelector == #selector(NSResponder.insertNewline(_:)) {
                 parent.onSubmit()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.moveDown(_:)) {
+                parent.onArrowDown()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.moveUp(_:)) {
+                parent.onArrowUp()
+                return true
+            }
+            if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+                parent.onEscape()
                 return true
             }
             return false

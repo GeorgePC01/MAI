@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import WebKit
 
 /// Vista principal del navegador
 struct BrowserView: View {
@@ -7,6 +8,11 @@ struct BrowserView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // Selector de workspace (solo si hay más de 1)
+            if !browserState.isIncognito {
+                WorkspaceBar()
+            }
+
             // Barra de título con tabs
             TabBar()
 
@@ -42,9 +48,9 @@ struct BrowserView: View {
                 .colorScheme(.dark)
             }
 
-            // Indicador de motor Chromium (cuando el tab usa CEF)
+            // Indicador discreto de reunión activa (CEF tabs)
             if browserState.isCurrentTabChromium {
-                ChromiumEngineIndicator()
+                MeetingIndicator()
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
@@ -66,6 +72,9 @@ struct BrowserView: View {
                 // WebView
                 WebViewContainer()
             }
+
+            // Banner de traducción
+            TranslationBanner()
 
             // Banner de suspensión (si hay tab pendiente)
             SuspensionBanner()
@@ -777,6 +786,8 @@ struct FindButtonStyle: ButtonStyle {
 /// Banner que pregunta al usuario si quiere suspender una tab (modo aprendizaje)
 struct SuspensionBanner: View {
     @ObservedObject private var autoSuspend = AutoSuspendManager.shared
+    @State private var iconScale: CGFloat = 1.0
+    @State private var glowOpacity: Double = 0.0
 
     var body: some View {
         if let tab = autoSuspend.pendingSuspensionTab {
@@ -784,6 +795,7 @@ struct SuspensionBanner: View {
                 Image(systemName: "brain.head.profile")
                     .foregroundColor(.orange)
                     .font(.system(size: 12))
+                    .scaleEffect(iconScale)
 
                 Text("Suspender '\(tab.title)'?")
                     .font(.system(size: 12, weight: .medium))
@@ -823,9 +835,309 @@ struct SuspensionBanner: View {
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 5)
-            .background(Color.orange.opacity(0.08))
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.orange.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 4)
+                            .stroke(Color.orange.opacity(glowOpacity * 0.4), lineWidth: 1)
+                    )
+            )
             .transition(.move(edge: .bottom).combined(with: .opacity))
+            .onAppear {
+                // Sonido sutil del sistema al aparecer
+                NSSound.beep()
+
+                // Animación pulse en el ícono (3 pulsos)
+                withAnimation(.easeInOut(duration: 0.3).repeatCount(3, autoreverses: true)) {
+                    iconScale = 1.3
+                }
+                // Glow del borde naranja
+                withAnimation(.easeInOut(duration: 0.6).repeatCount(2, autoreverses: true)) {
+                    glowOpacity = 1.0
+                }
+                // Reset después de las animaciones
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    withAnimation(.easeOut(duration: 0.3)) {
+                        iconScale = 1.0
+                        glowOpacity = 0.0
+                    }
+                }
+            }
         }
+    }
+}
+
+/// Barra de selección de workspace
+struct WorkspaceBar: View {
+    @ObservedObject private var workspaceManager = WorkspaceManager.shared
+    @EnvironmentObject var browserState: BrowserState
+    @State private var showCreateSheet = false
+    @State private var newName = ""
+    @State private var newColorHex = "007AFF"
+    @State private var newIcon = "briefcase.fill"
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ForEach(workspaceManager.workspaces) { workspace in
+                WorkspaceChip(
+                    workspace: workspace,
+                    isActive: workspace.id == browserState.workspaceID
+                )
+                .onTapGesture {
+                    if workspace.id != browserState.workspaceID {
+                        // Abrir nueva ventana con este workspace
+                        WindowManager.shared.openNewWindow(workspaceID: workspace.id)
+                    }
+                }
+                .contextMenu {
+                    if workspace.id != Workspace.defaultWorkspace.id {
+                        Button("Editar nombre...") {
+                            renameWorkspace(workspace)
+                        }
+                        Divider()
+                        Button("Eliminar workspace", role: .destructive) {
+                            workspaceManager.deleteWorkspace(workspace.id)
+                        }
+                    }
+                }
+            }
+
+            // Botón para crear workspace
+            Button(action: { showCreateSheet = true }) {
+                Image(systemName: "plus.circle")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Crear nuevo workspace")
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 4)
+        .background(Color(NSColor.windowBackgroundColor).opacity(0.95))
+        .sheet(isPresented: $showCreateSheet) {
+            CreateWorkspaceSheet(
+                name: $newName,
+                colorHex: $newColorHex,
+                icon: $newIcon,
+                onCreate: {
+                    let ws = workspaceManager.createWorkspace(name: newName, colorHex: newColorHex, icon: newIcon)
+                    newName = ""
+                    showCreateSheet = false
+                    // Abrir nueva ventana con el workspace recién creado
+                    WindowManager.shared.openNewWindow(workspaceID: ws.id)
+                },
+                onCancel: {
+                    newName = ""
+                    showCreateSheet = false
+                }
+            )
+        }
+    }
+
+    private func renameWorkspace(_ workspace: Workspace) {
+        let alert = NSAlert()
+        alert.messageText = "Renombrar workspace"
+        alert.addButton(withTitle: "Guardar")
+        alert.addButton(withTitle: "Cancelar")
+
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 250, height: 24))
+        input.stringValue = workspace.name
+        alert.accessoryView = input
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            var updated = workspace
+            updated.name = input.stringValue
+            workspaceManager.updateWorkspace(updated)
+        }
+    }
+}
+
+/// Chip visual de un workspace
+struct WorkspaceChip: View {
+    let workspace: Workspace
+    let isActive: Bool
+
+    var color: Color {
+        Color(hex: workspace.colorHex) ?? .blue
+    }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: workspace.icon)
+                .font(.system(size: 9))
+            Text(workspace.name)
+                .font(.system(size: 10, weight: isActive ? .semibold : .regular))
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(
+            RoundedRectangle(cornerRadius: 5)
+                .fill(isActive ? color.opacity(0.15) : Color.clear)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .stroke(isActive ? color : Color.gray.opacity(0.3), lineWidth: isActive ? 1.5 : 0.5)
+                )
+        )
+        .foregroundColor(isActive ? color : .secondary)
+    }
+}
+
+/// Sheet para crear un nuevo workspace
+struct CreateWorkspaceSheet: View {
+    @Binding var name: String
+    @Binding var colorHex: String
+    @Binding var icon: String
+    var onCreate: () -> Void
+    var onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Text("Nuevo Workspace")
+                .font(.headline)
+
+            TextField("Nombre", text: $name)
+                .textFieldStyle(.roundedBorder)
+
+            // Selector de color
+            HStack(spacing: 8) {
+                Text("Color:")
+                    .font(.caption)
+                ForEach(Workspace.defaultColors, id: \.hex) { c in
+                    Circle()
+                        .fill(Color(hex: c.hex) ?? .blue)
+                        .frame(width: 20, height: 20)
+                        .overlay(
+                            Circle()
+                                .stroke(Color.primary, lineWidth: colorHex == c.hex ? 2 : 0)
+                        )
+                        .onTapGesture { colorHex = c.hex }
+                }
+            }
+
+            // Selector de ícono
+            HStack(spacing: 8) {
+                Text("Ícono:")
+                    .font(.caption)
+                LazyVGrid(columns: Array(repeating: GridItem(.fixed(28)), count: 6), spacing: 4) {
+                    ForEach(Workspace.defaultIcons, id: \.self) { ic in
+                        Image(systemName: ic)
+                            .font(.system(size: 12))
+                            .frame(width: 28, height: 28)
+                            .background(
+                                RoundedRectangle(cornerRadius: 4)
+                                    .fill(icon == ic ? Color.accentColor.opacity(0.2) : Color.clear)
+                            )
+                            .onTapGesture { icon = ic }
+                    }
+                }
+            }
+
+            HStack {
+                Button("Cancelar", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Crear", action: onCreate)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
+    }
+}
+
+/// Extensión para crear Color desde hex string
+extension Color {
+    init?(hex: String) {
+        let hex = hex.trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        guard hex.count == 6,
+              let int = UInt64(hex, radix: 16) else { return nil }
+        let r = Double((int >> 16) & 0xFF) / 255.0
+        let g = Double((int >> 8) & 0xFF) / 255.0
+        let b = Double(int & 0xFF) / 255.0
+        self.init(red: r, green: g, blue: b)
+    }
+}
+
+/// Banner que ofrece traducir la página cuando detecta un idioma diferente al target
+struct TranslationBanner: View {
+    @ObservedObject private var translation = TranslationManager.shared
+    @EnvironmentObject var browserState: BrowserState
+
+    var body: some View {
+        if translation.showTranslationBanner && !translation.detectedLanguage.isEmpty {
+            HStack(spacing: 10) {
+                Image(systemName: "globe")
+                    .foregroundColor(.blue)
+                    .font(.system(size: 12))
+
+                Text("Página en \(TranslationManager.languageName(for: translation.detectedLanguage))")
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+
+                Spacer()
+
+                if translation.isTranslating {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                        .frame(width: 16, height: 16)
+                    Text("Traduciendo...")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                } else {
+                    // Traducir
+                    Button(action: { translateCurrentPage() }) {
+                        Text("Traducir a \(TranslationManager.languageName(for: translation.targetLanguage))")
+                            .font(.system(size: 11, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.blue)
+                    .controlSize(.mini)
+
+                    // Descartar
+                    Button(action: { translation.showTranslationBanner = false }) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Color.blue.opacity(0.06))
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
+    }
+
+    private func translateCurrentPage() {
+        // Buscar el WKWebView activo para inyectar la traducción
+        guard let window = NSApp.keyWindow,
+              let contentView = window.contentView else { return }
+
+        // Encontrar el WKWebView en la jerarquía
+        if let webView = findWebView(in: contentView) {
+            let sourceLang = translation.detectedLanguage
+            Task {
+                await translation.translatePage(webView: webView, from: sourceLang)
+            }
+        }
+    }
+
+    /// Busca recursivamente un WKWebView en la jerarquía de vistas
+    private func findWebView(in view: NSView) -> WKWebView? {
+        if let webView = view as? WKWebView {
+            return webView
+        }
+        for subview in view.subviews {
+            if let found = findWebView(in: subview) {
+                return found
+            }
+        }
+        return nil
     }
 }
 
@@ -867,29 +1179,37 @@ struct ChromeCompatIndicator: View {
     }
 }
 
-struct ChromiumEngineIndicator: View {
+/// Indicador discreto de reunión activa — reemplaza el viejo "Chromium Engine Indicator"
+struct MeetingIndicator: View {
     @EnvironmentObject var browserState: BrowserState
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: "gearshape.2.fill")
-                .foregroundColor(.orange)
-                .font(.system(size: 11))
+            Circle()
+                .fill(Color.green)
+                .frame(width: 7, height: 7)
 
-            Text("Chromium")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundColor(.orange)
-
-            Text("- \(browserState.videoConferenceServiceName) (screen sharing habilitado)")
+            Text("Reunión activa — \(browserState.videoConferenceServiceName)")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
                 .lineLimit(1)
 
             Spacer()
+
+            Button(action: {
+                if let window = NSApp.keyWindow {
+                    window.close()
+                }
+            }) {
+                Text("Cerrar al terminar")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 4)
-        .background(Color.orange.opacity(0.08))
+        .padding(.vertical, 3)
+        .background(Color.green.opacity(0.05))
     }
 }
 

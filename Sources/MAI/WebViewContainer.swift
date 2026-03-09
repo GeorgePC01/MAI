@@ -167,11 +167,18 @@ class WebViewConfigurationManager {
     }
 
     /// Crea una configuración para una nueva WebView
-    func createConfiguration(isIncognito: Bool = false) -> WKWebViewConfiguration {
+    /// workspaceID permite usar un data store aislado por workspace
+    func createConfiguration(isIncognito: Bool = false, workspaceID: UUID? = nil) -> WKWebViewConfiguration {
         let config = WKWebViewConfiguration()
 
-        // Incógnito: no persiste cookies, cache ni local storage
-        config.websiteDataStore = isIncognito ? incognitoDataStore : dataStore
+        // Prioridad: incógnito > workspace > default
+        if isIncognito {
+            config.websiteDataStore = incognitoDataStore
+        } else if let wsID = workspaceID, wsID != Workspace.defaultWorkspace.id {
+            config.websiteDataStore = WorkspaceManager.shared.dataStore(for: wsID)
+        } else {
+            config.websiteDataStore = dataStore
+        }
 
         // Identificarse como Safari en la configuración
         config.applicationNameForUserAgent = "Version/18.2 Safari/605.1.15"
@@ -195,6 +202,11 @@ class WebViewConfigurationManager {
             preferences.preferredContentMode = .desktop
         }
         config.defaultWebpagePreferences = preferences
+
+        // Optimización de video: permitir Picture-in-Picture y reproducción AirPlay
+        if #available(macOS 12.0, *) {
+            config.preferences.isTextInteractionEnabled = true
+        }
 
         // Inyectar script anti-detección al inicio de cada página
         let antiDetectionScript = WKUserScript(
@@ -363,8 +375,11 @@ struct WebViewRepresentable: NSViewRepresentable {
             return existingWebView
         }
 
-        // Usar configuración compartida (incógnito usa data store no-persistente)
-        let config = WebViewConfigurationManager.shared.createConfiguration(isIncognito: tab.isIncognito)
+        // Usar configuración compartida — workspace aísla cookies/cache/localStorage
+        let config = WebViewConfigurationManager.shared.createConfiguration(
+            isIncognito: tab.isIncognito,
+            workspaceID: browserState.workspaceID
+        )
 
         // Register YouTube ad block message handler
         if YouTubeAdBlockManager.shared.blockYouTubeAds {
@@ -555,13 +570,37 @@ struct WebViewRepresentable: NSViewRepresentable {
                 webView.evaluateJavaScript(YouTubeAdBlockManager.shared.cleanupScript) { _, _ in }
             }
 
-            // Full-text indexing: extraer texto de la página para búsqueda
-            if !tab.isIncognito && FullTextSearchManager.shared.isEnabled,
-               let url = webView.url?.absoluteString, url != "about:blank" {
-                webView.evaluateJavaScript("document.body.innerText") { [weak self] result, _ in
-                    if let text = result as? String, !text.isEmpty {
-                        let title = self?.tab.title ?? ""
-                        FullTextSearchManager.shared.indexPage(url: url, title: title, content: text)
+            // Delay operaciones pesadas de JS para no competir con video rendering
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                guard let self = self else { return }
+
+                // Full-text indexing: extraer texto de la página para búsqueda
+                if !self.tab.isIncognito && FullTextSearchManager.shared.isEnabled,
+                   let url = webView.url?.absoluteString, url != "about:blank" {
+                    webView.evaluateJavaScript("document.body.innerText") { result, _ in
+                        if let text = result as? String, !text.isEmpty {
+                            let title = self.tab.title
+                            FullTextSearchManager.shared.indexPage(url: url, title: title, content: text)
+                        }
+                    }
+                }
+
+                // Traducción: detectar idioma de la página y ofrecer traducción
+                let translation = TranslationManager.shared
+                if translation.isEnabled && !translation.currentTabTranslated,
+                   let url = webView.url?.absoluteString, url != "about:blank" {
+                    webView.evaluateJavaScript(TranslationManager.detectLanguageScript) { result, _ in
+                        guard let sampleText = result as? String, !sampleText.isEmpty else { return }
+                        Task {
+                            if let detected = await translation.detectLanguage(sampleText: sampleText) {
+                                await MainActor.run {
+                                    if detected != translation.targetLanguage && detected != "und" {
+                                        translation.detectedLanguage = detected
+                                        translation.showTranslationBanner = true
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -632,7 +671,8 @@ struct WebViewRepresentable: NSViewRepresentable {
             }
 
             // Interceptar dominios de videoconferencia → cambiar a Chromium
-            if BrowserState.shouldUseChromiumEngine(for: url.absoluteString) && !tab.useChromiumEngine {
+            // forceWebKit: usuario eligió modo básico (mantener reunión CEF activa)
+            if BrowserState.shouldUseChromiumEngine(for: url.absoluteString) && !tab.useChromiumEngine && !tab.forceWebKit {
                 print("🔄 WebKit interceptó videoconferencia: \(url.absoluteString)")
                 decisionHandler(.cancel)
                 DispatchQueue.main.async { [weak self] in
@@ -952,10 +992,18 @@ struct WebViewRepresentable: NSViewRepresentable {
         func webView(_ webView: WKWebView, decidePolicyFor navigationResponse: WKNavigationResponse, decisionHandler: @escaping (WKNavigationResponsePolicy) -> Void) {
             // Verificar si es un archivo descargable
             if let mimeType = navigationResponse.response.mimeType {
+                // PDFs → descargar a /tmp y abrir con Preview.app (no renderizar in-browser)
+                if mimeType == "application/pdf" || navigationResponse.response.url?.pathExtension.lowercased() == "pdf" {
+                    if let pdfURL = navigationResponse.response.url {
+                        openPDFInPreview(url: pdfURL)
+                    }
+                    decisionHandler(.cancel)
+                    return
+                }
+
                 let downloadableMimeTypes = [
                     "application/octet-stream",
                     "application/zip",
-                    "application/pdf",
                     "application/x-tar",
                     "application/gzip",
                     "application/x-gzip",
@@ -983,6 +1031,26 @@ struct WebViewRepresentable: NSViewRepresentable {
             }
 
             decisionHandler(.allow)
+        }
+
+        /// Descarga un PDF a /tmp y lo abre con Preview.app
+        private func openPDFInPreview(url: URL) {
+            let fileName = url.lastPathComponent.isEmpty ? "document.pdf" : url.lastPathComponent
+            let safeName = fileName.hasSuffix(".pdf") ? fileName : "\(fileName).pdf"
+            let tmpPath = FileManager.default.temporaryDirectory.appendingPathComponent(safeName)
+
+            Task {
+                do {
+                    let (data, _) = try await URLSession.shared.data(from: url)
+                    try data.write(to: tmpPath)
+                    await MainActor.run {
+                        NSWorkspace.shared.open(tmpPath)
+                        print("📄 PDF abierto en Preview.app: \(safeName)")
+                    }
+                } catch {
+                    print("⚠️ Error descargando PDF: \(error.localizedDescription)")
+                }
+            }
         }
 
         /// Cuando se inicia una descarga desde navegación
