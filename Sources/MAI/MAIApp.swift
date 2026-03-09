@@ -121,8 +121,8 @@ class WindowManager {
         print("🪟 Tab separada en nueva ventana (\(windows.count + 1) ventanas activas)")
     }
 
-    func openNewWindow(url: String? = nil, isIncognito: Bool = false) {
-        let browserState = BrowserState(isIncognito: isIncognito)
+    func openNewWindow(url: String? = nil, isIncognito: Bool = false, workspaceID: UUID? = nil) {
+        let browserState = BrowserState(isIncognito: isIncognito, workspaceID: workspaceID)
         if let url = url {
             browserState.navigate(to: url)
         }
@@ -137,7 +137,14 @@ class WindowManager {
             defer: false
         )
         window.contentView = NSHostingView(rootView: contentView)
-        window.title = isIncognito ? "MAI Browser — Incógnito" : "MAI Browser"
+        let wsName = workspaceID.flatMap({ WorkspaceManager.shared.workspace(for: $0)?.name })
+        if isIncognito {
+            window.title = "MAI Browser — Incógnito"
+        } else if let name = wsName, workspaceID != Workspace.defaultWorkspace.id {
+            window.title = "MAI Browser — \(name)"
+        } else {
+            window.title = "MAI Browser"
+        }
         window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
         // Prevenir crash en _NSWindowTransformAnimation dealloc:
@@ -307,6 +314,23 @@ struct MAIApp: App {
                     }
                 }
                 .keyboardShortcut("d", modifiers: .command)
+
+                Divider()
+
+                Button("Traducir Página") {
+                    let translation = TranslationManager.shared
+                    if translation.showTranslationBanner {
+                        // Si ya hay banner, simular click en traducir
+                        // El banner se encarga de buscar el webView
+                    } else {
+                        // Mostrar banner forzando detección
+                        translation.showTranslationBanner = true
+                        if translation.detectedLanguage.isEmpty {
+                            translation.detectedLanguage = "auto"
+                        }
+                    }
+                }
+                .keyboardShortcut("t", modifiers: [.command, .shift])
             }
         }
 

@@ -73,6 +73,12 @@ class PhishingDetector: ObservableObject {
             return .safe
         }
 
+        // Dominios legítimos de servicios conocidos (CDNs, videoconferencia, etc.)
+        // Estos dominios usan muchos subdominios por diseño y no son sospechosos
+        if isKnownSafeDomain(host) {
+            return .safe
+        }
+
         var score: Double = 0.0
         var reasons: [String] = []
 
@@ -215,5 +221,27 @@ class PhishingDetector: ObservableObject {
         // Excesivo: cualquier cosa más allá de 3 partes
         let excess = parts.count - 3
         return max(0, excess)
+    }
+
+    /// Dominios legítimos de servicios conocidos que usan muchos subdominios por diseño
+    private let knownSafeDomains: [String] = [
+        // Microsoft / Teams / Office 365
+        "microsoft.com", "live.net", "live.com", "office.com", "office365.com",
+        "sharepoint.com", "onedrive.com", "microsoftonline.com", "azure.com",
+        "azureedge.net", "msftauth.net", "msauth.net", "skype.com",
+        // Google
+        "google.com", "googleapis.com", "gstatic.com", "googlevideo.com",
+        "googleusercontent.com", "youtube.com", "ytimg.com",
+        // Zoom
+        "zoom.us", "zoomcdn.com",
+        // Apple
+        "apple.com", "icloud.com", "cdn-apple.com",
+        // CDNs comunes
+        "cloudflare.com", "cloudfront.net", "akamaized.net", "akamai.net",
+        "fastly.net", "edgecastcdn.net",
+    ]
+
+    private func isKnownSafeDomain(_ host: String) -> Bool {
+        return knownSafeDomains.contains { host == $0 || host.hasSuffix("." + $0) }
     }
 }
