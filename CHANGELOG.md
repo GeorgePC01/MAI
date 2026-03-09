@@ -4,6 +4,35 @@ Registro completo de cada versión con detalle técnico para continuidad entre s
 
 ---
 
+## Roadmap v1.0 — Features por Implementar
+
+Investigación de mercado (2025-2026): features que usuarios piden y ningún browser resuelve bien.
+
+| # | Feature | Esfuerzo | Impacto | Estado |
+|---|---------|----------|---------|--------|
+| 1 | **Auto-rechazo cookie banners + GPC** | Medio | Muy Alto | ⏳ |
+| 2 | **Búsqueda full-text en historial** | Medio | Muy Alto | ⏳ |
+| 3 | **Workspaces con contextos aislados** | Alto | Muy Alto | ⏳ |
+| 4 | **Traducción de páginas** | Medio | Alto | ⏳ |
+| 5 | **Animación + sonido al cerrar tab ML** | Bajo | Medio | ⏳ |
+| 6 | **Sesiones crash-proof** | Bajo | Alto | ⏳ |
+| 7 | **Anotaciones web nativas** | Medio | Alto | ⏳ |
+| 8 | **Modo Focus** | Bajo | Alto | ⏳ |
+| 9 | **Screenshot página completa** | Bajo | Medio | ⏳ |
+| 10 | **Smart Bookmarks** (auto-tags, dead links) | Medio | Alto | ⏳ |
+| 11 | **Split View** | Medio | Medio | ⏳ |
+| 12 | **Anti-fingerprinting real** | Alto | Alto | ⏳ |
+| 13 | **Tab intelligence** (duplicados, auto-archive, búsqueda) | Bajo | Medio | ⏳ |
+| 14 | **Data portability** (export JSON/SQLite) | Bajo | Medio | ⏳ |
+| 15 | **PDFs → Preview.app** (no renderizar in-browser) | Bajo | Medio | ⏳ |
+
+### Decisiones
+- **PDFs**: No renderizar en browser. Detectar → descargar a /tmp → abrir con Preview.app (NSWorkspace). Cero overhead.
+- **v1.0**: Features 1-5 + landing page + notarización = listo para público
+- **Versioning**: +0.0.1 por sesión/feature, v1.0 para release público
+
+---
+
 ## v0.9.0 (2026-03-08) — URL Suggestions, Tab Tear-off/Merge, Crash Recovery
 
 ### URL Autocomplete (AddressBar.swift)

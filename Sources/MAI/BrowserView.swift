@@ -330,39 +330,98 @@ struct HistorySection: View {
     @EnvironmentObject var browserState: BrowserState
     @ObservedObject private var historyManager = HistoryManager.shared
     @State private var searchText = ""
+    @State private var fullTextResults: [FullTextSearchManager.SearchResult] = []
+    @State private var isFullTextSearch = false
 
     var body: some View {
-        // Búsqueda
-        TextField("Buscar historial...", text: $searchText)
-            .textFieldStyle(.roundedBorder)
-            .padding(.horizontal, 4)
+        // Búsqueda con toggle full-text
+        VStack(spacing: 4) {
+            TextField("Buscar historial...", text: $searchText)
+                .textFieldStyle(.roundedBorder)
+                .padding(.horizontal, 4)
+                .onChange(of: searchText) { query in
+                    if isFullTextSearch && query.count >= 3 {
+                        fullTextResults = FullTextSearchManager.shared.search(query: query)
+                    } else {
+                        fullTextResults = []
+                    }
+                }
 
+            if FullTextSearchManager.shared.isEnabled {
+                Toggle("Buscar en contenido de páginas", isOn: $isFullTextSearch)
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .padding(.horizontal, 8)
+                    .onChange(of: isFullTextSearch) { enabled in
+                        if enabled && searchText.count >= 3 {
+                            fullTextResults = FullTextSearchManager.shared.search(query: searchText)
+                        } else {
+                            fullTextResults = []
+                        }
+                    }
+            }
+        }
+
+        // Resultados full-text
+        if isFullTextSearch && !fullTextResults.isEmpty {
+            Section("Resultados en contenido") {
+                ForEach(fullTextResults) { result in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(result.title.isEmpty ? result.url : result.title)
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                        Text(result.snippet)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .lineLimit(2)
+                        Text(result.url)
+                            .font(.system(size: 10))
+                            .foregroundColor(.blue)
+                            .lineLimit(1)
+                    }
+                    .padding(.vertical, 2)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        browserState.navigate(to: result.url)
+                    }
+                }
+            }
+        } else if isFullTextSearch && searchText.count >= 3 && fullTextResults.isEmpty {
+            Text("Sin resultados en contenido")
+                .foregroundColor(.secondary)
+                .font(.caption)
+                .padding(.horizontal, 8)
+        }
+
+        // Historial normal
         let groupedHistory = historyManager.getGroupedHistory()
 
-        if groupedHistory.isEmpty {
-            Text("Sin historial")
-                .foregroundColor(.secondary)
-                .padding()
-        } else {
-            ForEach(groupedHistory, id: \.date) { group in
-                Section(group.date) {
-                    ForEach(filteredEntries(group.entries)) { entry in
-                        HistoryRow(entry: entry)
+        if !isFullTextSearch {
+            if groupedHistory.isEmpty {
+                Text("Sin historial")
+                    .foregroundColor(.secondary)
+                    .padding()
+            } else {
+                ForEach(groupedHistory, id: \.date) { group in
+                    Section(group.date) {
+                        ForEach(filteredEntries(group.entries)) { entry in
+                            HistoryRow(entry: entry)
+                        }
                     }
                 }
             }
+        }
 
-            // Botón para limpiar
-            Section {
-                Button(action: { historyManager.clearAll() }) {
-                    HStack {
-                        Image(systemName: "trash")
-                        Text("Limpiar historial")
-                    }
-                    .foregroundColor(.red)
+        // Botón para limpiar
+        Section {
+            Button(action: { historyManager.clearAll() }) {
+                HStack {
+                    Image(systemName: "trash")
+                    Text("Limpiar historial")
                 }
-                .buttonStyle(.plain)
+                .foregroundColor(.red)
             }
+            .buttonStyle(.plain)
         }
     }
 

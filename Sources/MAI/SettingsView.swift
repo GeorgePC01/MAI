@@ -86,6 +86,7 @@ struct PrivacySettingsView: View {
     @ObservedObject private var easyListManager = EasyListManager.shared
     @ObservedObject private var phishingDetector = PhishingDetector.shared
     @ObservedObject private var ytAdBlock = YouTubeAdBlockManager.shared
+    @ObservedObject private var cookieBanner = CookieBannerManager.shared
     @AppStorage("dnsOverHTTPS") private var dnsOverHTTPS = true
     @AppStorage("clearDataOnExit") private var clearDataOnExit = false
 
@@ -160,12 +161,73 @@ struct PrivacySettingsView: View {
                 }
             }
 
+            Section("Cookie Banners") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Auto-rechazar banners de cookies", isOn: $cookieBanner.autoDismissCookieBanners)
+                    Text("Rechaza automáticamente cookies no esenciales en sitios con OneTrust, Cookiebot, Quantcast, Didomi y otros")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Enviar señal GPC (Global Privacy Control)", isOn: $cookieBanner.sendGPC)
+                    Text("Solicita legalmente que sitios no vendan ni compartan tus datos (California AB 566, GDPR)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                if cookieBanner.autoDismissCookieBanners {
+                    HStack {
+                        Label("\(cookieBanner.bannersBlocked) banners rechazados", systemImage: "xmark.shield.fill")
+                        Spacer()
+                        Button("Reiniciar") {
+                            cookieBanner.resetCount()
+                        }
+                        .buttonStyle(.borderless)
+                    }
+                }
+            }
+
             Section("Detección de Phishing") {
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Detectar URLs de phishing", isOn: $phishingDetector.isEnabled)
                     Text("Analiza URLs con heurísticas para detectar suplantación de identidad y sitios fraudulentos")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+            }
+
+            Section("Búsqueda Full-Text") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Indexar contenido de páginas visitadas", isOn: Binding(
+                        get: { FullTextSearchManager.shared.isEnabled },
+                        set: { FullTextSearchManager.shared.isEnabled = $0 }
+                    ))
+                    Text("Permite buscar por cualquier texto que hayas leído en una página. No indexa en modo incógnito.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Label("\(FullTextSearchManager.shared.indexedPages) páginas indexadas", systemImage: "doc.text.magnifyingglass")
+                    Spacer()
+                    Text(FullTextSearchManager.shared.indexSizeFormatted)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                HStack {
+                    Button("Limpiar índice") {
+                        FullTextSearchManager.shared.clearIndex()
+                    }
+                    .buttonStyle(.borderless)
+
+                    Spacer()
+
+                    Button("Limpiar entradas > 90 días") {
+                        FullTextSearchManager.shared.pruneOldEntries()
+                    }
+                    .buttonStyle(.borderless)
                 }
             }
 
