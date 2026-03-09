@@ -48,81 +48,80 @@ struct AddressBar: View {
             NavigationButtons()
 
             // Campo de URL con sugerencias
-            ZStack(alignment: .topLeading) {
-                HStack(spacing: 8) {
-                    SecurityIndicator(url: urlText)
+            HStack(spacing: 8) {
+                SecurityIndicator(url: urlText)
 
-                    AddressTextField(
-                        text: $urlText,
-                        isFocused: $isFocused,
-                        onSubmit: {
-                            if selectedSuggestionIndex >= 0 && selectedSuggestionIndex < suggestions.count {
-                                selectSuggestion(suggestions[selectedSuggestionIndex])
-                            } else {
-                                navigateToURL()
+                AddressTextField(
+                    text: $urlText,
+                    isFocused: $isFocused,
+                    onSubmit: {
+                        if selectedSuggestionIndex >= 0 && selectedSuggestionIndex < suggestions.count {
+                            selectSuggestion(suggestions[selectedSuggestionIndex])
+                        } else {
+                            navigateToURL()
+                        }
+                    },
+                    onArrowDown: {
+                        if showSuggestions && !suggestions.isEmpty {
+                            selectedSuggestionIndex = min(selectedSuggestionIndex + 1, suggestions.count - 1)
+                        }
+                    },
+                    onArrowUp: {
+                        if showSuggestions {
+                            selectedSuggestionIndex = max(selectedSuggestionIndex - 1, -1)
+                        }
+                    },
+                    onEscape: {
+                        if showSuggestions {
+                            showSuggestions = false
+                            selectedSuggestionIndex = -1
+                        } else {
+                            if let window = NSApp.keyWindow {
+                                window.makeFirstResponder(nil)
                             }
-                        },
-                        onArrowDown: {
-                            if showSuggestions && !suggestions.isEmpty {
-                                selectedSuggestionIndex = min(selectedSuggestionIndex + 1, suggestions.count - 1)
-                            }
-                        },
-                        onArrowUp: {
-                            if showSuggestions {
-                                selectedSuggestionIndex = max(selectedSuggestionIndex - 1, -1)
-                            }
-                        },
-                        onEscape: {
-                            if showSuggestions {
+                        }
+                    },
+                    onFocusChange: { focused in
+                        isEditing = focused
+                        if !focused {
+                            suggestDebounceTask?.cancel()
+                            // Delay para permitir click en sugerencia antes de cerrar
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                                 showSuggestions = false
+                                suggestions = []
                                 selectedSuggestionIndex = -1
-                            } else {
-                                if let window = NSApp.keyWindow {
-                                    window.makeFirstResponder(nil)
-                                }
-                            }
-                        },
-                        onFocusChange: { focused in
-                            isEditing = focused
-                            if !focused {
-                                suggestDebounceTask?.cancel()
-                                // Delay para permitir click en sugerencia antes de cerrar
-                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
-                                    showSuggestions = false
-                                    suggestions = []
-                                    selectedSuggestionIndex = -1
-                                }
                             }
                         }
-                    )
-                        .onChange(of: urlText) { newText in
-                            if isEditing {
-                                updateSuggestions(for: newText)
-                            }
-                        }
-                }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(browserState.isIncognito
-                              ? Color(red: 0.20, green: 0.21, blue: 0.24)
-                              : Color(NSColor.textBackgroundColor))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(isEditing ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: isEditing ? 2 : 1)
-                        )
-                )
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    NSApplication.shared.activate(ignoringOtherApps: true)
-                    resignWebViewFocus()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
-                        isFocused = true
                     }
+                )
+                    .onChange(of: urlText) { newText in
+                        if isEditing {
+                            updateSuggestions(for: newText)
+                        }
+                    }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(browserState.isIncognito
+                          ? Color(red: 0.20, green: 0.21, blue: 0.24)
+                          : Color(NSColor.textBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(isEditing ? Color.accentColor : Color.gray.opacity(0.3), lineWidth: isEditing ? 2 : 1)
+                    )
+            )
+            .contentShape(Rectangle())
+            .onTapGesture {
+                NSApplication.shared.activate(ignoringOtherApps: true)
+                resignWebViewFocus()
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                    isFocused = true
                 }
-
-                // Dropdown de sugerencias
+            }
+            .overlay(alignment: .top) {
+                // Dropdown de sugerencias — overlay para que no sea recortado por el layout padre
                 if showSuggestions && !suggestions.isEmpty {
                     SuggestionsDropdown(
                         suggestions: suggestions,

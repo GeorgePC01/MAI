@@ -10,8 +10,9 @@ struct BrowserView: View {
             // Barra de título con tabs
             TabBar()
 
-            // Barra de navegación
+            // Barra de navegación (zIndex alto para que el dropdown de sugerencias no sea tapado)
             AddressBar()
+                .zIndex(50)
 
             // Barra de progreso
             if browserState.isLoading {
