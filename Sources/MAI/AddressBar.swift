@@ -239,55 +239,86 @@ struct AddressBar: View {
 
     @MainActor
     private func fetchGoogleSuggestions(query: String, localResults: [URLSuggestion], seenKeys: Set<String>) async {
+        // Chrome Omnibox endpoint (same as real Chrome) — richer results than suggestqueries.google.com
+        let lang = Locale.current.language.languageCode?.identifier ?? "es"
         guard let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed),
-              let url = URL(string: "https://suggestqueries.google.com/complete/search?client=chrome&q=\(encoded)&hl=es") else { return }
+              let url = URL(string: "https://www.google.com/complete/search?client=chrome-omni&q=\(encoded)&hl=\(lang)") else { return }
 
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
-            guard let json = try? JSONSerialization.jsonObject(with: data) as? [Any],
+
+            // Google puede responder en Latin-1 (ej: ñ = 0xF1) — normalizar a UTF-8
+            let jsonString: String
+            if let utf8 = String(data: data, encoding: .utf8) {
+                jsonString = utf8
+            } else if let latin1 = String(data: data, encoding: .isoLatin1) {
+                jsonString = latin1
+            } else {
+                return
+            }
+
+            guard let jsonData = jsonString.data(using: .utf8),
+                  let json = try? JSONSerialization.jsonObject(with: jsonData) as? [Any],
                   json.count >= 2,
                   let suggestStrings = json[1] as? [String] else { return }
 
-            // Verificar que seguimos editando (el cancel del Task ya maneja cambios de query)
+            // Verificar que seguimos editando
             guard isEditing else { return }
 
-            // Parsear tipos (NAVIGATION vs QUERY) y descripciones
+            // Parsear tipos (NAVIGATION/QUERY/CALCULATOR) y descripciones
             let descriptions = (json.count >= 3 ? json[2] as? [String] : nil) ?? []
             var suggestTypes: [String] = []
-            if json.count >= 5, let metadata = json[4] as? [String: Any],
-               let types = metadata["google:suggesttype"] as? [String] {
-                suggestTypes = types
+            var relevanceScores: [Int] = []
+            if json.count >= 5, let metadata = json[4] as? [String: Any] {
+                suggestTypes = metadata["google:suggesttype"] as? [String] ?? []
+                relevanceScores = metadata["google:suggestrelevance"] as? [Int] ?? []
             }
 
-            var navigationResults: [URLSuggestion] = []
-            var searchResults: [URLSuggestion] = []
+            var googleResults: [(suggestion: URLSuggestion, relevance: Int)] = []
             var keys = seenKeys
 
             for (i, s) in suggestStrings.enumerated() {
-                let isNavigation = i < suggestTypes.count && suggestTypes[i] == "NAVIGATION"
+                let type = i < suggestTypes.count ? suggestTypes[i] : "QUERY"
                 let description = i < descriptions.count ? descriptions[i] : ""
+                let relevance = i < relevanceScores.count ? relevanceScores[i] : 500
                 let key = s.lowercased()
 
                 guard !keys.contains(key) else { continue }
                 keys.insert(key)
 
-                if isNavigation {
-                    // NAVIGATION: el string es una URL directa
+                switch type {
+                case "NAVIGATION":
+                    // URL directa con descripción del sitio
                     let title = description.isEmpty ? s : description
-                    navigationResults.append(URLSuggestion(url: s, title: title, source: .bookmark))
-                } else {
+                    googleResults.append((
+                        URLSuggestion(url: s, title: title, source: .bookmark),
+                        relevance
+                    ))
+                case "CALCULATOR":
+                    // Resultado de calculadora (ej: "= 12")
+                    googleResults.append((
+                        URLSuggestion(url: "https://www.google.com/search?q=\(encoded)", title: "\(query) \(s)", source: .search),
+                        relevance + 100 // Priorizar calculadora
+                    ))
+                default:
                     // QUERY: sugerencia de búsqueda
                     let searchURL = "https://www.google.com/search?q=\(s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s)"
-                    searchResults.append(URLSuggestion(url: searchURL, title: s, source: .search))
+                    googleResults.append((
+                        URLSuggestion(url: searchURL, title: s, source: .search),
+                        relevance
+                    ))
                 }
             }
 
-            // Combinar: locales + navegación (URLs) primero, luego búsquedas
-            var combined = localResults
-            combined.append(contentsOf: navigationResults.prefix(3))
-            combined.append(contentsOf: searchResults.prefix(4))
+            // Ordenar por relevancia (Google ya los ordena, pero CALCULATOR tiene boost)
+            googleResults.sort { $0.relevance > $1.relevance }
 
-            suggestions = Array(combined.prefix(8))
+            // Combinar: locales primero (máx 3), luego Google por relevancia
+            var combined = Array(localResults.prefix(3))
+            let remainingSlots = 8 - combined.count
+            combined.append(contentsOf: googleResults.prefix(remainingSlots).map(\.suggestion))
+
+            suggestions = combined
             showSuggestions = !suggestions.isEmpty
         } catch {
             // Fallo silencioso — las sugerencias locales ya están mostrándose
