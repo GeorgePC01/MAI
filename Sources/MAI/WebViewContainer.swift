@@ -204,6 +204,28 @@ class WebViewConfigurationManager {
         )
         config.userContentController.addUserScript(antiDetectionScript)
 
+        // GPC (Global Privacy Control) + Cookie Banner auto-dismiss
+        let cookieBanner = CookieBannerManager.shared
+        if cookieBanner.sendGPC {
+            let gpcScript = WKUserScript(
+                source: CookieBannerManager.gpcScript,
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: false
+            )
+            config.userContentController.addUserScript(gpcScript)
+        }
+        if cookieBanner.autoDismissCookieBanners {
+            let bannerScript = WKUserScript(
+                source: CookieBannerManager.bannerDismissScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+            config.userContentController.addUserScript(bannerScript)
+            if let ruleList = cookieBanner.compiledRuleList {
+                config.userContentController.add(ruleList)
+            }
+        }
+
         // Apply EasyList content blocking rules (compiled WKContentRuleList)
         if PrivacyManager.shared.useEasyList {
             for ruleList in EasyListManager.shared.compiledRuleLists {
@@ -349,6 +371,11 @@ struct WebViewRepresentable: NSViewRepresentable {
             config.userContentController.add(context.coordinator, name: "youtubeAdBlocked")
         }
 
+        // Register cookie banner dismiss message handler
+        if CookieBannerManager.shared.autoDismissCookieBanners {
+            config.userContentController.add(context.coordinator, name: "cookieBannerDismissed")
+        }
+
         // Crear WebView con configuración compartida
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -414,6 +441,8 @@ struct WebViewRepresentable: NSViewRepresentable {
         func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
             if message.name == "youtubeAdBlocked" {
                 YouTubeAdBlockManager.shared.incrementAdsBlocked()
+            } else if message.name == "cookieBannerDismissed" {
+                CookieBannerManager.shared.bannersBlocked += 1
             }
         }
 
@@ -524,6 +553,17 @@ struct WebViewRepresentable: NSViewRepresentable {
             if YouTubeAdBlockManager.shared.blockYouTubeAds,
                let host = webView.url?.host, host.contains("youtube.com") {
                 webView.evaluateJavaScript(YouTubeAdBlockManager.shared.cleanupScript) { _, _ in }
+            }
+
+            // Full-text indexing: extraer texto de la página para búsqueda
+            if !tab.isIncognito && FullTextSearchManager.shared.isEnabled,
+               let url = webView.url?.absoluteString, url != "about:blank" {
+                webView.evaluateJavaScript("document.body.innerText") { [weak self] result, _ in
+                    if let text = result as? String, !text.isEmpty {
+                        let title = self?.tab.title ?? ""
+                        FullTextSearchManager.shared.indexPage(url: url, title: title, content: text)
+                    }
+                }
             }
         }
 

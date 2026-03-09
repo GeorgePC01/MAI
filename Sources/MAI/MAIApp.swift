@@ -352,6 +352,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 await YouTubeAdBlockManager.shared.compileNetworkRules()
             }
         }
+
+        // Pre-compile cookie banner CSS hiding rules
+        if CookieBannerManager.shared.autoDismissCookieBanners {
+            CookieBannerManager.shared.compileRules()
+        }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
