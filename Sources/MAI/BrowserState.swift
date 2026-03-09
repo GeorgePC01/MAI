@@ -602,6 +602,33 @@ class BrowserState: ObservableObject {
         showFindInPage = false
     }
 
+    // MARK: - Chrome Compatibility Mode
+
+    /// Toggle Chrome compatibility mode for a tab and persist preference per domain
+    func toggleChromeCompatMode(_ tab: Tab) {
+        tab.chromeCompatMode.toggle()
+
+        // Persist preference for this domain
+        let domain = AutoSuspendManager.extractDomain(from: tab.url)
+        if !domain.isEmpty {
+            ChromeCompatManager.shared.setPreference(domain: domain, enabled: tab.chromeCompatMode)
+        }
+
+        // Reload the tab to apply new UA + scripts
+        if let webView = tab.webView {
+            webView.customUserAgent = tab.chromeCompatMode
+                ? ChromeCompatManager.chromeUserAgent
+                : ChromeCompatManager.safariUserAgent
+            webView.reload()
+        }
+    }
+
+    /// Check if a domain has Chrome compat mode saved
+    static func shouldUseChromeCompat(for urlString: String) -> Bool {
+        let domain = AutoSuspendManager.extractDomain(from: urlString)
+        return ChromeCompatManager.shared.isEnabled(domain: domain)
+    }
+
     // MARK: - CEF Hybrid Engine (Video Conferencing)
 
     /// Dominios de videoconferencia que usan Chromium engine
@@ -746,7 +773,12 @@ class Tab: ObservableObject, Identifiable {
     @Published var isPinned: Bool = false
     @Published var isMuted: Bool = false
 
+    // Chrome compatibility mode (spoof Chrome identity on WebKit)
+    @Published var chromeCompatMode: Bool = false
+
     weak var webView: WKWebView?
+    /// Referencia strong temporal durante transferencia entre ventanas (tear-off/merge)
+    var retainedWebView: WKWebView?
 
     init(url: String = "about:blank", isIncognito: Bool = false) {
         self.url = url

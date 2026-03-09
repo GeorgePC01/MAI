@@ -182,5 +182,22 @@ struct CEFWebView: NSViewRepresentable {
                 }
             }
         }
+
+        func cefBrowserRendererCrashed(withStatus status: Int32) {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                let statusName: String
+                switch status {
+                case 0: statusName = "abnormal exit"
+                case 1: statusName = "killed"
+                case 2: statusName = "crashed"
+                case 3: statusName = "out of memory"
+                default: statusName = "unknown"
+                }
+                NSLog("[CEF] Renderer crash detected in tab '\(self.tab.title)': \(statusName). Auto-reloading...")
+                self.tab.isLoading = true
+                self.browserState.isLoading = true
+            }
+        }
     }
 }

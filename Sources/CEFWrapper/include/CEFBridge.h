@@ -19,6 +19,7 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)cefBrowserDidUpdateTitle:(NSString *)title;
 - (void)cefBrowserDidUpdateLoadProgress:(double)progress;
 - (void)cefBrowserDidClose;
+- (void)cefBrowserRendererCrashedWithStatus:(int)status;
 @end
 
 /// Bridge between CEF C API and Swift/Objective-C

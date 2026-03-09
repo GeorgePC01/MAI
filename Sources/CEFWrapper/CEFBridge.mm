@@ -658,16 +658,13 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                                         "console.log('[MAI] Using canvas fallback path (5fps)');"
                                     "}"
 
-                                    // Shared: add silent audio track
-                                    "try{"
-                                        "var ac=new AudioContext();"
-                                        "var osc=ac.createOscillator();"
-                                        "var g=ac.createGain();g.gain.value=0;"
-                                        "osc.connect(g);"
-                                        "var dest=ac.createMediaStreamDestination();"
-                                        "g.connect(dest);osc.start();"
-                                        "stream.addTrack(dest.stream.getAudioTracks()[0]);"
-                                    "}catch(e){console.warn('[MAI] Audio track creation failed:',e);}"
+                                    // NOTE: Silent audio track REMOVED (v0.7.2).
+                                    // Adding a silent AudioContext + OscillatorNode track caused
+                                    // Google Meet to replaceTrack() the microphone sender with it,
+                                    // killing the real mic track (state→ended). This triggered SDP
+                                    // BUNDLE codec collision errors [111:audio/opus] x2 and left
+                                    // the user without microphone. getDisplayMedia should return
+                                    // video-only — Meet/Teams/Zoom keep mic on a separate getUserMedia.
 
                                     // Shared: displaySurface metadata + cleanup
                                     "var vt=stream.getVideoTracks()[0];"
@@ -1753,9 +1750,71 @@ static cef_resource_request_handler_t* CEF_CALLBACK get_resource_request_handler
     return &g_resourceRequestHandler;
 }
 
+// Called when a renderer process crashes or is terminated
+static void CEF_CALLBACK on_render_process_terminated(
+    cef_request_handler_t* self,
+    cef_browser_t* browser,
+    cef_termination_status_t status,
+    int error_code,
+    const cef_string_t* error_string) {
+
+    const char* statusStr = "unknown";
+    switch (status) {
+        case TS_ABNORMAL_TERMINATION: statusStr = "abnormal exit"; break;
+        case TS_PROCESS_WAS_KILLED:   statusStr = "killed"; break;
+        case TS_PROCESS_CRASHED:      statusStr = "crashed"; break;
+        case TS_PROCESS_OOM:          statusStr = "out of memory"; break;
+        default: break;
+    }
+    NSLog(@"[CEF] Renderer process terminated: %s (error_code=%d)", statusStr, error_code);
+
+    // Notify delegate on main thread
+    dispatch_async(dispatch_get_main_queue(), ^{
+        if ([CEFBridge.delegate respondsToSelector:@selector(cefBrowserRendererCrashedWithStatus:)]) {
+            [CEFBridge.delegate cefBrowserRendererCrashedWithStatus:(int)status];
+        }
+    });
+
+    // Auto-reload: get current URL and reload the page after a short delay
+    if (browser) {
+        cef_frame_t* mainFrame = browser->get_main_frame(browser);
+        if (mainFrame) {
+            cef_string_userfree_t urlStr = mainFrame->get_url(mainFrame);
+            if (urlStr) {
+                cef_string_utf8_t urlUtf8 = {};
+                cef_string_to_utf8(urlStr->str, urlStr->length, &urlUtf8);
+                NSString* currentURL = [NSString stringWithUTF8String:urlUtf8.str];
+                cef_string_utf8_clear(&urlUtf8);
+                cef_string_userfree_free(urlStr);
+
+                NSLog(@"[CEF] Auto-reloading crashed tab: %@", currentURL);
+
+                // Reload after 1s to let CEF recover
+                dispatch_after(dispatch_time(DISPATCH_TIME_NOW, (int64_t)(1.0 * NSEC_PER_SEC)),
+                    dispatch_get_main_queue(), ^{
+                        if (g_browser) {
+                            cef_string_t cefURL = {};
+                            cef_string_from_utf8([currentURL UTF8String],
+                                                 [currentURL lengthOfBytesUsingEncoding:NSUTF8StringEncoding],
+                                                 &cefURL);
+                            cef_frame_t* frame = g_browser->get_main_frame(g_browser);
+                            if (frame) {
+                                frame->load_url(frame, &cefURL);
+                                cef_release(&frame->base);
+                            }
+                            cef_string_clear(&cefURL);
+                        }
+                    });
+            }
+            cef_release(&mainFrame->base);
+        }
+    }
+}
+
 static void init_request_handler() {
     init_simple_ref(&g_requestHandler.base, sizeof(cef_request_handler_t));
     g_requestHandler.get_resource_request_handler = get_resource_request_handler_cb;
+    g_requestHandler.on_render_process_terminated = on_render_process_terminated;
 }
 
 static cef_request_handler_t* CEF_CALLBACK get_request_handler(cef_client_t* self) {
@@ -1905,11 +1964,18 @@ static void CEF_CALLBACK on_before_command_line_processing(
     {
         cef_string_t dfKey = cef_string_from_nsstring(@"disable-features");
 
+        // FontationsFontBackend: Disable Rust fontations font renderer — crashes
+        // in fontations_ffi with EXC_BREAKPOINT during bitmap glyph rendering.
+        // Falls back to stable CoreText (macOS native) font backend.
+        // RustPngDecoder: Disable Rust PNG decoder — crashes in rust_png
+        // during page compositing. Falls back to stable C libpng.
+        // Both were in the crash stack of MAI Helper (Renderer) 2026-03-02.
         NSString* features =
             @"MediaRouter,PwaNavigationCapturing,WebAppInstallation,"
             @"WebAppSystemMediaControls,DesktopPWAsAdditionalWindowingControls,"
             @"ChromeWebAppShortcutCopier,BackForwardCache,"
-            @"ThirdPartyCookiePhaseout";
+            @"ThirdPartyCookiePhaseout,"
+            @"FontationsFontBackend,RustPngDecoder";
 
         NSLog(@"[CEF] Adding disable-features: %@", features);
         cef_string_t dfVal = cef_string_from_nsstring(features);

@@ -85,6 +85,7 @@ struct PrivacySettingsView: View {
     @ObservedObject private var privacyManager = PrivacyManager.shared
     @ObservedObject private var easyListManager = EasyListManager.shared
     @ObservedObject private var phishingDetector = PhishingDetector.shared
+    @ObservedObject private var ytAdBlock = YouTubeAdBlockManager.shared
     @AppStorage("dnsOverHTTPS") private var dnsOverHTTPS = true
     @AppStorage("clearDataOnExit") private var clearDataOnExit = false
 
@@ -99,6 +100,26 @@ struct PrivacySettingsView: View {
                     Text("Los dominios de OAuth (Google, Microsoft, etc.) están en whitelist")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+            }
+
+            Section("YouTube") {
+                VStack(alignment: .leading, spacing: 4) {
+                    Toggle("Bloquear anuncios de YouTube", isOn: $ytAdBlock.blockYouTubeAds)
+                    Text("Bloquea pre-rolls, mid-rolls, banners y ads de sidebar en YouTube")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+
+                if ytAdBlock.blockYouTubeAds {
+                    HStack {
+                        Label("\(ytAdBlock.adsBlocked) anuncios bloqueados", systemImage: "shield.checkered")
+                        Spacer()
+                        Button("Reiniciar") {
+                            ytAdBlock.resetCount()
+                        }
+                        .buttonStyle(.borderless)
+                    }
                 }
             }
 
@@ -321,9 +342,9 @@ struct AdvancedSettingsView: View {
             }
 
             Section("Información") {
-                LabeledContent("Versión", value: "0.7.0-alpha")
+                LabeledContent("Versión", value: "0.8.0-alpha")
                 LabeledContent("Motor", value: "WebKit + CEF")
-                LabeledContent("Build", value: "2026.02.28")
+                LabeledContent("Build", value: "2026.03.02")
             }
         }
         .padding()

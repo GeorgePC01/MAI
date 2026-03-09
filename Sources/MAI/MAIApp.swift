@@ -4,7 +4,122 @@ import CEFWrapper
 /// Gestor de ventanas adicionales del navegador
 class WindowManager {
     static let shared = WindowManager()
-    private var windows: [(window: NSWindow, state: BrowserState)] = []
+    var windows: [(window: NSWindow, state: BrowserState)] = []
+
+    /// Registra la ventana principal (llamado desde BrowserView.onAppear)
+    func registerMainWindow(state: BrowserState) {
+        guard let window = NSApp.windows.first(where: { w in
+            !(w is NSPanel) && !windows.contains(where: { $0.window === w })
+        }) else { return }
+        if !windows.contains(where: { $0.state === state }) {
+            windows.append((window: window, state: state))
+        }
+    }
+
+    /// Busca el BrowserState de otra ventana cuyo tab bar contiene el punto en pantalla
+    func browserState(at screenPoint: NSPoint, excluding: BrowserState) -> BrowserState? {
+        for entry in windows {
+            guard entry.state !== excluding, entry.window.isVisible else { continue }
+            let windowFrame = entry.window.frame
+            // Zona del tab bar: los 50px superiores de la ventana (margen generoso)
+            let tabBarRect = NSRect(x: windowFrame.minX, y: windowFrame.maxY - 50, width: windowFrame.width, height: 50)
+            if tabBarRect.contains(screenPoint) {
+                return entry.state
+            }
+        }
+        return nil
+    }
+
+    /// Incorpora una tab a un BrowserState existente (merge), cerrando la ventana origen si queda vacía
+    func mergeTab(_ tab: Tab, into targetState: BrowserState, from sourceState: BrowserState) {
+        // Retener webView
+        tab.retainedWebView = tab.webView
+
+        // Remover de origen
+        if let index = sourceState.tabs.firstIndex(where: { $0.id == tab.id }) {
+            sourceState.tabs.remove(at: index)
+            sourceState.currentTabIndex = min(sourceState.currentTabIndex, max(sourceState.tabs.count - 1, 0))
+        }
+
+        // Agregar al destino
+        targetState.tabs.append(tab)
+        targetState.currentTabIndex = targetState.tabs.count - 1
+
+        // Si la ventana origen quedó sin tabs, cerrarla
+        if sourceState.tabs.isEmpty {
+            if let entry = windows.first(where: { $0.state === sourceState }) {
+                entry.window.close()
+            }
+        }
+
+        print("🔗 Tab merged into window (\(targetState.tabs.count) tabs)")
+    }
+
+    /// Separa una tab existente en una nueva ventana (tear off)
+    func openNewWindow(withTab tab: Tab, from sourceBrowserState: BrowserState, at screenPoint: NSPoint? = nil) {
+        guard sourceBrowserState.tabs.count > 1 else { return } // No separar si es la única tab
+
+        // Retener webView antes de remover la tab (evita que weak ref se pierda)
+        tab.retainedWebView = tab.webView
+
+        // Remover tab del estado original
+        if let index = sourceBrowserState.tabs.firstIndex(where: { $0.id == tab.id }) {
+            sourceBrowserState.tabs.remove(at: index)
+            sourceBrowserState.currentTabIndex = min(sourceBrowserState.currentTabIndex, sourceBrowserState.tabs.count - 1)
+        }
+
+        // Crear nueva ventana con la tab (webView se transfiere sin recargar)
+        let newBrowserState = BrowserState(isIncognito: tab.isIncognito)
+        newBrowserState.tabs = [tab]
+        newBrowserState.currentTabIndex = 0
+
+        let contentView = BrowserView()
+            .environmentObject(newBrowserState)
+            .frame(minWidth: 800, minHeight: 600)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 1200, height: 800),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = NSHostingView(rootView: contentView)
+        window.title = tab.isIncognito ? "MAI Browser — Incógnito" : "MAI Browser"
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.isReleasedWhenClosed = false
+        window.animationBehavior = .none
+        if tab.isIncognito {
+            window.backgroundColor = NSColor(red: 0.10, green: 0.10, blue: 0.12, alpha: 1.0)
+        }
+
+        // Posicionar donde el usuario soltó la tab
+        if let point = screenPoint {
+            window.setFrameOrigin(NSPoint(x: point.x - 600, y: point.y - 400))
+        } else {
+            window.center()
+        }
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+
+        windows.append((window: window, state: newBrowserState))
+
+        NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] notification in
+            if let closedWindow = notification.object as? NSWindow {
+                closedWindow.contentView = nil
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                    self?.windows.removeAll { $0.window === closedWindow }
+                }
+            }
+        }
+
+        print("🪟 Tab separada en nueva ventana (\(windows.count + 1) ventanas activas)")
+    }
 
     func openNewWindow(url: String? = nil, isIncognito: Bool = false) {
         let browserState = BrowserState(isIncognito: isIncognito)
@@ -228,6 +343,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if PrivacyManager.shared.useEasyList {
             Task {
                 await EasyListManager.shared.loadFilterLists()
+            }
+        }
+
+        // Pre-compile YouTube ad block rules
+        if YouTubeAdBlockManager.shared.blockYouTubeAds {
+            Task {
+                await YouTubeAdBlockManager.shared.compileNetworkRules()
             }
         }
     }
