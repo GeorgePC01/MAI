@@ -21,6 +21,7 @@
 #include "include/capi/cef_request_context_capi.h"
 // NOTE: Views framework headers removed — Views is incompatible with
 // external_message_pump=1 on macOS (requires MessagePumpNSApplication).
+#include "include/capi/cef_devtools_message_observer_capi.h"
 #include "include/cef_api_hash.h"
 #include "include/wrapper/cef_library_loader.h"
 
@@ -29,6 +30,10 @@
 
 #include <atomic>
 #include <stdio.h>
+#include <cxxabi.h>
+#include <exception>
+#include <setjmp.h>
+#include <signal.h>
 
 // File-based logging for permission debugging (NSLog may not appear in system logs)
 static void cef_log_to_file(const char* fmt, ...) __attribute__((format(printf, 1, 2)));
@@ -61,9 +66,20 @@ static __weak id<CEFBridgeDelegate> g_delegate = nil;
 static BOOL g_isStandaloneMode = NO;
 static NSWindow* g_standaloneNSWindow = nil;
 
+// CDP (Chrome DevTools Protocol) state
+static cef_registration_t* g_cdpRegistration = NULL;
+static __weak id<CEFBridgeCDPDelegate> g_cdpDelegate = nil;
+static int g_cdpMessageId = 0;
+
+// Browser generation counter — incremented on each browser creation/release.
+// Dispatch blocks from on_schedule_message_pump_work capture this value
+// and skip execution if it no longer matches (stale blocks from old browser).
+static int g_browserGeneration = 0;
+
 // Forward declarations
 static void stopMessagePump(void);
 static void startMessagePump(void);
+static void safe_do_message_loop_work(void);
 static void enumerate_cookies_for_url(const char* label);
 
 // MARK: - Reference Counting Helpers
@@ -1876,21 +1892,24 @@ static void CEF_CALLBACK on_schedule_message_pump_work(
 
     if (!g_cefInitialized) return;
 
+    // Capture current browser generation to detect stale blocks after browser switch
+    int gen = g_browserGeneration;
+
     if (delay_ms <= 0) {
         // Work needed ASAP - dispatch immediately to main thread
         dispatch_async(dispatch_get_main_queue(), ^{
-            if (g_cefInitialized && g_browser) {
-                cef_do_message_loop_work();
+            if (g_cefInitialized && g_browser && gen == g_browserGeneration) {
+                safe_do_message_loop_work();
             }
         });
     } else {
-        // Schedule delayed work, replacing any pending scheduled call
+        // Schedule delayed work
         dispatch_after(
             dispatch_time(DISPATCH_TIME_NOW, delay_ms * NSEC_PER_MSEC),
             dispatch_get_main_queue(),
             ^{
-                if (g_cefInitialized && g_browser) {
-                    cef_do_message_loop_work();
+                if (g_cefInitialized && g_browser && gen == g_browserGeneration) {
+                    safe_do_message_loop_work();
                 }
             });
     }
@@ -1964,18 +1983,24 @@ static void CEF_CALLBACK on_before_command_line_processing(
     {
         cef_string_t dfKey = cef_string_from_nsstring(@"disable-features");
 
-        // FontationsFontBackend: Disable Rust fontations font renderer — crashes
-        // in fontations_ffi with EXC_BREAKPOINT during bitmap glyph rendering.
-        // Falls back to stable CoreText (macOS native) font backend.
-        // RustPngDecoder: Disable Rust PNG decoder — crashes in rust_png
-        // during page compositing. Falls back to stable C libpng.
-        // Both were in the crash stack of MAI Helper (Renderer) 2026-03-02.
+        // Disable ALL Rust-based codecs/renderers in Chromium 145.
+        // The Rust↔C++↔ObjC bridge creates dynamic ObjC classes that are
+        // incompatible with macOS 26.3.1 — causes "unrecognized selector
+        // sent to instance" crash (SIGTRAP) during cef_do_message_loop_work.
+        // Crash stack shows: SymphoniaDecoder, rust_bmp, xml_ffi.
+        // Disabling falls back to stable C/C++ implementations.
+        //
+        // FontationsFontBackend → CoreText (macOS native)
+        // RustPngDecoder → libpng (C)
+        // RustAudioDecoder (Symphonia) → platform audio decoder
+        // RustColorProvider → C++ color provider
         NSString* features =
             @"MediaRouter,PwaNavigationCapturing,WebAppInstallation,"
             @"WebAppSystemMediaControls,DesktopPWAsAdditionalWindowingControls,"
             @"ChromeWebAppShortcutCopier,BackForwardCache,"
             @"ThirdPartyCookiePhaseout,"
-            @"FontationsFontBackend,RustPngDecoder";
+            @"FontationsFontBackend,RustPngDecoder,"
+            @"RustAudioDecoder,RustColorProvider";
 
         NSLog(@"[CEF] Adding disable-features: %@", features);
         cef_string_t dfVal = cef_string_from_nsstring(features);
@@ -2043,23 +2068,88 @@ static void init_app() {
     g_app.get_browser_process_handler = get_browser_process_handler;
 }
 
-// MARK: - Message Pump (fallback timer)
-// The primary pump is driven by on_schedule_message_pump_work callback.
-// This fallback timer ensures work is processed even if callbacks are missed.
+// MARK: - Message Pump with crash recovery
+//
+// CEF 145's internal Chromium code has an incompatibility with macOS 26.3.1:
+// during cef_do_message_loop_work(), Chromium's Rust↔ObjC bridge sends an
+// unrecognized selector to a dynamic class → NSInvalidArgumentException →
+// C++ noexcept → std::terminate → SIGTRAP → process death.
+//
+// We cannot prevent the exception (it's deep inside CEF). We cannot catch it
+// with @try/@catch (C++ noexcept bypasses ObjC exception handling). We cannot
+// swizzle reportException: (std::terminate calls abort() regardless).
+//
+// The ONLY remaining option: catch the SIGTRAP signal and use longjmp to
+// recover from the crash, skipping the failed cef_do_message_loop_work() call.
+
+static sigjmp_buf g_pumpJmpBuf;
+static volatile sig_atomic_t g_inMessagePump = 0;
+static struct sigaction g_oldSigtrapAction;
+static struct sigaction g_oldSigabrtAction;
+static int g_pumpCrashCount = 0;
+
+static void cef_crash_signal_handler(int sig) {
+    if (g_inMessagePump) {
+        // We're inside cef_do_message_loop_work() — recover via longjmp
+        g_inMessagePump = 0;
+        siglongjmp(g_pumpJmpBuf, sig);
+        // NEVER REACHED
+    }
+    // Not in our message pump — restore original handler and re-raise
+    if (sig == SIGTRAP) {
+        sigaction(SIGTRAP, &g_oldSigtrapAction, NULL);
+    } else {
+        sigaction(SIGABRT, &g_oldSigabrtAction, NULL);
+    }
+    raise(sig);
+}
+
+static void install_pump_signal_handlers() {
+    struct sigaction sa = {};
+    sa.sa_handler = cef_crash_signal_handler;
+    sa.sa_flags = 0; // No SA_RESTART — we want the signal to interrupt
+    sigemptyset(&sa.sa_mask);
+
+    sigaction(SIGTRAP, &sa, &g_oldSigtrapAction);
+    sigaction(SIGABRT, &sa, &g_oldSigabrtAction);
+    NSLog(@"[CEF] Signal handlers installed for SIGTRAP/SIGABRT recovery");
+}
+
+/// Safe wrapper around cef_do_message_loop_work() that catches SIGTRAP/SIGABRT
+/// from CEF's internal Chromium crash and recovers instead of dying.
+static void safe_do_message_loop_work() {
+    if (!g_cefInitialized) return;
+
+    g_inMessagePump = 1;
+    int sig = sigsetjmp(g_pumpJmpBuf, 1); // 1 = save signal mask
+    if (sig == 0) {
+        // Normal path — call CEF
+        cef_do_message_loop_work();
+    } else {
+        // Recovery path — we caught a signal from inside cef_do_message_loop_work
+        g_pumpCrashCount++;
+        NSLog(@"[CEF] ⚠️ Recovered from signal %d in message pump (crash #%d)",
+              sig, g_pumpCrashCount);
+    }
+    g_inMessagePump = 0;
+}
 
 static void startMessagePump() {
     if (g_messagePumpTimer) return;
 
-    // Fallback timer at 30Hz - the on_schedule_message_pump_work callback
-    // handles the real-time scheduling, this is just a safety net.
+    // Install signal handlers for crash recovery
+    install_pump_signal_handlers();
+
+    // Fallback timer at 30Hz. The primary pump is on_schedule_message_pump_work,
+    // this covers edge cases (UI tracking mode, missed callbacks).
+    // Uses safe_do_message_loop_work() which catches SIGTRAP/SIGABRT as safety net.
     g_messagePumpTimer = [NSTimer scheduledTimerWithTimeInterval:1.0/30.0
                                                          repeats:YES
                                                            block:^(NSTimer* timer) {
         if (g_cefInitialized && g_browser) {
-            cef_do_message_loop_work();
+            safe_do_message_loop_work();
         }
     }];
-    // Ensure timer fires during UI tracking (e.g., window dragging)
     [[NSRunLoop mainRunLoop] addTimer:g_messagePumpTimer
                               forMode:NSRunLoopCommonModes];
 }
@@ -2067,6 +2157,22 @@ static void startMessagePump() {
 static void stopMessagePump() {
     [g_messagePumpTimer invalidate];
     g_messagePumpTimer = nil;
+}
+
+// MARK: - Uncaught Exception Logger
+
+static void mai_uncaught_exception_handler(NSException* exception) {
+    NSString* info = [NSString stringWithFormat:
+        @"=== MAI Uncaught Exception ===\n"
+        @"Name: %@\n"
+        @"Reason: %@\n"
+        @"UserInfo: %@\n"
+        @"Stack:\n%@\n",
+        exception.name, exception.reason, exception.userInfo,
+        [exception.callStackSymbols componentsJoinedByString:@"\n"]];
+    [info writeToFile:@"/tmp/mai_exception.log"
+           atomically:YES encoding:NSUTF8StringEncoding error:nil];
+    NSLog(@"[CEF] FATAL EXCEPTION: %@", exception.reason);
 }
 
 // MARK: - CEFBridge Implementation
@@ -2093,6 +2199,14 @@ static void stopMessagePump() {
     if (g_cefInitialized) return YES;
 
     NSLog(@"[CEF] Initializing Chromium Embedded Framework...");
+
+    // Install global exception logger to capture the ACTUAL selector name
+    // from CEF's "unrecognized selector" crash. This fires before the process
+    // dies and writes details to /tmp/mai_exception.log for diagnosis.
+    static dispatch_once_t onceToken;
+    dispatch_once(&onceToken, ^{
+        NSSetUncaughtExceptionHandler(&mai_uncaught_exception_handler);
+    });
 
     // Step 1: Dynamically load the CEF framework library (REQUIRED on macOS)
     // Direct linking causes crashes because Chromium's initialization code runs
@@ -2456,6 +2570,15 @@ static void stopMessagePump() {
 
     NSLog(@"[CEF] Force-releasing browser (standalone=%d)", g_isStandaloneMode);
 
+    // Invalidate any pending dispatch blocks from on_schedule_message_pump_work
+    g_browserGeneration++;
+
+    // Detach CDP observer BEFORE releasing browser
+    if (g_cdpRegistration) {
+        cef_release(&g_cdpRegistration->base);
+        g_cdpRegistration = NULL;
+    }
+
     // Stop capture and message pump FIRST to prevent any further CEF callbacks
     stopWindowCapture();
     stopMessagePump();
@@ -2550,6 +2673,121 @@ static void stopMessagePump() {
     // Title comes from display handler callback, not from browser directly
     cef_release(&host->base);
     return nil; // Title is tracked via delegate callbacks
+}
+
+// MARK: - CDP (Chrome DevTools Protocol)
+
++ (void)setCDPDelegate:(nullable id<CEFBridgeCDPDelegate>)delegate {
+    g_cdpDelegate = delegate;
+}
+
++ (BOOL)cdpAttach {
+    if (!g_browser) return NO;
+
+    cef_browser_host_t* host = g_browser->get_host(g_browser);
+    if (!host) return NO;
+
+    // Remove previous observer if any
+    if (g_cdpRegistration) {
+        cef_release(&g_cdpRegistration->base);
+        g_cdpRegistration = NULL;
+    }
+
+    // Create DevTools message observer
+    cef_dev_tools_message_observer_t* observer =
+        (cef_dev_tools_message_observer_t*)calloc(1, sizeof(cef_dev_tools_message_observer_t));
+
+    init_simple_ref(&observer->base, sizeof(cef_dev_tools_message_observer_t));
+
+    // on_dev_tools_message: raw JSON message (return false to let it propagate)
+    observer->on_dev_tools_message = [](cef_dev_tools_message_observer_t* self,
+                                        cef_browser_t* browser,
+                                        const void* message,
+                                        size_t message_size) -> int {
+        return 0; // Let it propagate to method_result / event callbacks
+    };
+
+    // on_dev_tools_method_result: response to a command we sent
+    observer->on_dev_tools_method_result = [](cef_dev_tools_message_observer_t* self,
+                                              cef_browser_t* browser,
+                                              int message_id,
+                                              int success,
+                                              const void* result,
+                                              size_t result_size) {
+        NSString* json = nil;
+        if (result && result_size > 0) {
+            json = [[NSString alloc] initWithBytes:result length:result_size encoding:NSUTF8StringEncoding];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [g_cdpDelegate cdpDidReceiveMethodResult:message_id success:(success != 0) result:json ?: @"{}"];
+        });
+    };
+
+    // on_dev_tools_event: async events (Debugger.paused, Debugger.scriptParsed, etc.)
+    observer->on_dev_tools_event = [](cef_dev_tools_message_observer_t* self,
+                                      cef_browser_t* browser,
+                                      const cef_string_t* method,
+                                      const void* params,
+                                      size_t params_size) {
+        NSString* methodStr = nsstring_from_cef_string(method);
+        NSString* paramsJson = nil;
+        if (params && params_size > 0) {
+            paramsJson = [[NSString alloc] initWithBytes:params length:params_size encoding:NSUTF8StringEncoding];
+        }
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [g_cdpDelegate cdpDidReceiveEvent:methodStr params:paramsJson ?: @"{}"];
+        });
+    };
+
+    observer->on_dev_tools_agent_attached = [](cef_dev_tools_message_observer_t* self,
+                                               cef_browser_t* browser) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [g_cdpDelegate cdpDidAttach];
+        });
+    };
+
+    observer->on_dev_tools_agent_detached = [](cef_dev_tools_message_observer_t* self,
+                                               cef_browser_t* browser) {
+        dispatch_async(dispatch_get_main_queue(), ^{
+            [g_cdpDelegate cdpDidDetach];
+        });
+    };
+
+    g_cdpRegistration = host->add_dev_tools_message_observer(host, observer);
+    cef_release(&observer->base);
+    cef_release(&host->base);
+
+    return (g_cdpRegistration != NULL);
+}
+
++ (void)cdpDetach {
+    if (g_cdpRegistration) {
+        cef_release(&g_cdpRegistration->base);
+        g_cdpRegistration = NULL;
+    }
+}
+
++ (int)cdpSendMethod:(NSString *)method params:(nullable NSString *)paramsJson {
+    if (!g_browser) return 0;
+
+    cef_browser_host_t* host = g_browser->get_host(g_browser);
+    if (!host) return 0;
+
+    int msgId = ++g_cdpMessageId;
+
+    // Build JSON-RPC message: {"id": N, "method": "...", "params": {...}}
+    NSString* json;
+    if (paramsJson && paramsJson.length > 0) {
+        json = [NSString stringWithFormat:@"{\"id\":%d,\"method\":\"%@\",\"params\":%@}", msgId, method, paramsJson];
+    } else {
+        json = [NSString stringWithFormat:@"{\"id\":%d,\"method\":\"%@\",\"params\":{}}", msgId, method];
+    }
+
+    const char* utf8 = [json UTF8String];
+    int result = host->send_dev_tools_message(host, utf8, strlen(utf8));
+    cef_release(&host->base);
+
+    return result ? msgId : 0;
 }
 
 @end

@@ -1,5 +1,44 @@
 import SwiftUI
 import CEFWrapper
+import ObjectiveC
+
+// MARK: - CEF + macOS 26 Compatibility Fix
+//
+// ROOT CAUSE: CEF 145 (Chromium) internally calls -[NSApplication isHandlingSendEvent]
+// during cef_do_message_loop_work(). In standard AppKit, NSApplication implements this.
+// But SwiftUI uses SwiftUI.AppKitApplication (a subclass) which does NOT implement it.
+// On macOS 26.3.1, this causes NSInvalidArgumentException → SIGTRAP → crash.
+//
+// FIX: Dynamically add -isHandlingSendEvent to SwiftUI.AppKitApplication at runtime.
+// The method returns NO (we're not in a sendEvent: call from CEF's perspective).
+
+func installCEFCompatibilityFix() {
+    guard let app = NSApp else { return }
+
+    let actualClass: AnyClass = type(of: app)
+    let selector = NSSelectorFromString("isHandlingSendEvent")
+
+    // Check if the method already exists
+    if class_getInstanceMethod(actualClass, selector) != nil {
+        NSLog("[CEF] isHandlingSendEvent already exists on %@", NSStringFromClass(actualClass))
+        return
+    }
+
+    // Add -isHandlingSendEvent → returns NO (BOOL/ObjCBool)
+    // Method signature: "c@:" = returns char (BOOL), takes self + _cmd
+    let imp = imp_implementationWithBlock({ (_: AnyObject) -> ObjCBool in
+        return ObjCBool(false)
+    } as @convention(block) (AnyObject) -> ObjCBool)
+
+    let typeEncoding = "c@:" // BOOL return, id self, SEL _cmd
+    let added = class_addMethod(actualClass, selector, imp, typeEncoding)
+    if added {
+        NSLog("[CEF] ✅ Added isHandlingSendEvent to %@ — CEF compatibility fix applied",
+              NSStringFromClass(actualClass))
+    } else {
+        NSLog("[CEF] ⚠️ Failed to add isHandlingSendEvent to %@", NSStringFromClass(actualClass))
+    }
+}
 
 /// Gestor de ventanas adicionales del navegador
 class WindowManager {
@@ -207,6 +246,15 @@ struct MAIApp: App {
             BrowserView()
                 .environmentObject(browserState)
                 .frame(minWidth: 800, minHeight: 600)
+                .onAppear {
+                    // Registrar estado principal para guardado de sesión
+                    SessionManager.shared.mainBrowserState = browserState
+                    SessionManager.shared.startAutoSave(mainState: browserState)
+                    // Si hay sesión guardada, mostrar banner (no restaurar automáticamente)
+                    if SessionManager.shared.restoreSessionOnLaunch && SessionManager.shared.hasSavedSession {
+                        browserState.showSessionRestore = true
+                    }
+                }
         }
         .windowStyle(.automatic)
         .commands {
@@ -332,6 +380,54 @@ struct MAIApp: App {
                 }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
             }
+
+            CommandMenu("Desarrollo") {
+                Button("DevTools") {
+                    browserState.showDevTools.toggle()
+                }
+                .keyboardShortcut("i", modifiers: [.command, .option])
+
+                Button("Consola JavaScript") {
+                    DevToolsState.shared.selectedTab = .console
+                    browserState.showDevTools = true
+                }
+                .keyboardShortcut("j", modifiers: [.command, .option])
+
+                Button("Inspeccionar Elementos") {
+                    DevToolsState.shared.selectedTab = .elements
+                    browserState.showDevTools = true
+                }
+
+                Button("Monitor de Red") {
+                    DevToolsState.shared.selectedTab = .network
+                    browserState.showDevTools = true
+                }
+
+                Divider()
+
+                Button("CSS Debug") {
+                    DevToolsState.shared.selectedTab = .cssDebug
+                    browserState.showDevTools = true
+                }
+
+                Button("Vista 3D del DOM") {
+                    DevToolsState.shared.selectedTab = .dom3d
+                    browserState.showDevTools = true
+                }
+
+                Button("Auditoría de Accesibilidad") {
+                    DevToolsState.shared.selectedTab = .accessibility
+                    browserState.showDevTools = true
+                }
+
+                Divider()
+
+                Button("Ver Código Fuente") {
+                    DevToolsState.shared.selectedTab = .sources
+                    browserState.showDevTools = true
+                }
+                .keyboardShortcut("u", modifiers: [.command, .option])
+            }
         }
 
         Settings {
@@ -353,8 +449,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("MAI Browser iniciado")
 
+        // Add missing isHandlingSendEvent method to SwiftUI.AppKitApplication.
+        // CEF 145 calls this on NSApp during message pump, but SwiftUI's subclass
+        // doesn't implement it → crash on macOS 26.3.1. This adds it dynamically.
+        installCEFCompatibilityFix()
+
         // Activar la aplicación
         NSApp.activate(ignoringOtherApps: true)
+
+        // Doble click en titlebar para maximizar/restaurar ventana
+        // SwiftUI con fullSizeContentView impide que el titlebar reciba el doble click nativo
+        NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { event in
+            if event.clickCount == 2, let window = event.window {
+                // Zona del titlebar: los 38px superiores (altura de la tab bar)
+                let locationInWindow = event.locationInWindow
+                let titlebarHeight: CGFloat = 38
+                if locationInWindow.y >= window.frame.height - titlebarHeight {
+                    // Respetar preferencia del sistema: zoom o minimize
+                    let action = UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") ?? "Maximize"
+                    if action == "Minimize" {
+                        window.miniaturize(nil)
+                    } else {
+                        window.zoom(nil)
+                    }
+                }
+            }
+            return event
+        }
 
         // Limpiar snapshots huérfanos de sesión anterior
         let snapshotsDir = Tab.snapshotsDirectory
@@ -384,6 +505,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        // Guardar sesión antes de cerrar
+        if let mainState = SessionManager.shared.mainBrowserState {
+            SessionManager.shared.saveOnTerminate(mainState: mainState)
+            print("💾 Sesión guardada antes de cerrar")
+        }
         // Shutdown CEF if it was initialized
         if CEFBridge.isInitialized {
             CEFBridge.shutdownCEF()

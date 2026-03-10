@@ -15,21 +15,227 @@ Investigación de mercado (2025-2026): features que usuarios piden y ningún bro
 | 3 | **Workspaces con contextos aislados** | Alto | Muy Alto | ✅ v0.9.2 |
 | 4 | **Traducción de páginas** | Medio | Alto | ✅ v0.9.2 |
 | 5 | **Animación + sonido al cerrar tab ML** | Bajo | Medio | ✅ v0.9.2 |
-| 6 | **Sesiones crash-proof** | Bajo | Alto | ⏳ |
+| 6 | **Sesiones crash-proof** | Bajo | Alto | ✅ v0.9.3 |
 | 7 | **Anotaciones web nativas** | Medio | Alto | ⏳ |
 | 8 | **Modo Focus** | Bajo | Alto | ⏳ |
 | 9 | **Screenshot página completa** | Bajo | Medio | ⏳ |
 | 10 | **Smart Bookmarks** (auto-tags, dead links) | Medio | Alto | ⏳ |
 | 11 | **Split View** | Medio | Medio | ⏳ |
-| 12 | **Anti-fingerprinting real** | Alto | Alto | ⏳ |
-| 13 | **Tab intelligence** (duplicados, auto-archive, búsqueda) | Bajo | Medio | ⏳ |
-| 14 | **Data portability** (export JSON/SQLite) | Bajo | Medio | ⏳ |
+| 12 | **Anti-fingerprinting real** | Alto | Alto | ✅ v0.9.3 |
+| 13 | **Tab intelligence** (duplicados, auto-archive, búsqueda) | Bajo | Medio | ✅ v0.9.3 |
+| 14 | **Data portability** (export JSON/SQLite) | Bajo | Medio | ✅ v0.9.3 |
 | 15 | **PDFs → Preview.app** (no renderizar in-browser) | Bajo | Medio | ✅ v0.9.2 |
+
+---
+
+## Roadmap v2.0 — MAI Ads: Publicidad Inversa
+
+**Concepto**: Invertir el modelo publicitario de internet. En vez de forzar ads al usuario, las empresas pagan al usuario por ver publicidad relevante.
+
+### El Problema Actual
+Las empresas pagan a Google/YouTube → Ads forzados al usuario → Usuario molesto → Instala ad blocker → La empresa pierde dinero → El creador de contenido pierde ingresos → Nadie gana.
+
+### La Solución MAI
+Las empresas pagan a MAI → MAI paga al usuario por ver ads → El usuario decide qué tipo de publicidad ver → Ads basados en intereses reales (no espionaje) → Mejor conversión para empresas → Todos ganan.
+
+### Principios Clave
+
+1. **Consentimiento real**: El usuario ELIGE activar MAI Ads y decide qué categorías de interés le gustan. Nunca se impone publicidad.
+2. **Targeting ético**: Basado en intereses declarados por el usuario, NO en tracking invasivo, cookies de terceros ni fingerprinting. El usuario controla su perfil.
+3. **Publicidad proporcional**: Ads más agresivos (largos, intrusivos) = la empresa paga MÁS al usuario. Esto incentiva ads cortos, creativos y de calidad.
+4. **Dinero real**: Pagos en dinero real (PayPal, transferencia bancaria, créditos en tiendas), no criptomonedas confusas.
+5. **Transparencia total**: El usuario ve exactamente cuánto paga cada empresa, qué datos se comparten (solo categorías de interés, nunca historial), y puede desactivarlo en cualquier momento.
+
+### Modelo de Negocio
+
+| Participante | Beneficio |
+|---|---|
+| **Usuario** | Gana dinero por ver ads que le interesan. Controla sus datos. |
+| **Empresa/Anunciante** | Mejor ROI: audiencia interesada = mayor conversión. Sin ad blockers. |
+| **Creador de contenido** | Ingresos más estables (usuarios no bloquean, las empresas pagan más por targeting real). |
+| **MAI** | Comisión del 20-30% por intermediar. Modelo sostenible sin vender datos. |
+
+### Diferenciador vs Brave
+Brave usa BAT (crypto tokens): volátil, confuso, difícil de convertir, requiere wallet crypto. MAI usa dinero real, interfaz simple, sin blockchain.
+
+### Features Planificados
+
+| # | Feature | Prioridad |
+|---|---------|-----------|
+| A1 | **Panel de usuario MAI Ads** — activar/desactivar, elegir categorías de interés, ver ganancias | Alta |
+| A2 | **Dashboard de anunciante** — subir ads, elegir audiencia por interés, establecer presupuesto, métricas | Alta |
+| A3 | **Sistema de pagos** — acumulación de saldo, retiro via PayPal/transferencia, historial | Alta |
+| A4 | **Ad delivery engine** — mostrar ads relevantes en momentos no intrusivos (nueva pestaña, entre videos) | Media |
+| A5 | **Scoring de calidad de ads** — usuarios califican ads, los mejores pagan menos, los peores pagan más | Media |
+| A6 | **API para anunciantes** — integración programática para campañas a escala | Baja |
+| A7 | **Reportes de impacto** — cuánto ganó el usuario, cuánto ahorró la empresa vs Google Ads | Baja |
+
+### Fases de Implementación
+- **Fase 1**: Backend + panel de usuario + integración básica en el navegador
+- **Fase 2**: Dashboard de anunciante + sistema de pagos + primeros anunciantes beta
+- **Fase 3**: API pública + scoring + escala
+
+---
 
 ### Decisiones
 - **PDFs**: No renderizar en browser. Detectar → descargar a /tmp → abrir con Preview.app (NSWorkspace). Cero overhead.
-- **v1.0**: Features 1-5 + landing page + notarización = listo para público
-- **Versioning**: +0.0.1 por sesión/feature, v1.0 para release público
+- **v1.0**: Features 1-6 + landing page + notarización = listo para público
+- **v2.0**: MAI Ads — modelo de publicidad inversa (requiere backend, pagos, panel anunciantes)
+- **Versioning**: +0.0.1 por sesión/feature, v1.0 para release público, v2.0 para MAI Ads
+
+---
+
+## v0.9.4 (2026-03-10) — DevTools Profesional Completo + CEF Crash Fix + CDP Debugger
+
+### CEF Crash Fix (macOS 26.3.1)
+- **Root cause**: `SwiftUI.AppKitApplication` (subclase de NSApplication) no implementa `-isHandlingSendEvent` que Chromium llama internamente
+- **Fix**: `class_addMethod` inyecta `isHandlingSendEvent` → `NO` en runtime antes de crear cualquier browser CEF
+- **Safety net**: Signal handler `setjmp/longjmp` para SIGTRAP/SIGABRT dentro de `cef_do_message_loop_work()` — si CEF crashea internamente, la app sobrevive
+- **Browser generation counter**: `g_browserGeneration` previene que bloques `dispatch_async` de sesiones antiguas ejecuten con estado nuevo
+- **Exception logger**: `NSSetUncaughtExceptionHandler` escribe detalles a `/tmp/mai_exception.log`
+
+### CDP JS Debugger (Chrome DevTools Protocol)
+- **CDPManager.swift**: Singleton que usa `send_dev_tools_message` + `add_dev_tools_message_observer` de CEF C API
+- **Breakpoints reales**: `Debugger.setBreakpointByUrl` con línea y columna
+- **Step debugging**: stepOver, stepInto, stepOut, resume via CDP
+- **Scope inspection**: Variables locales y de closure en cada paused frame
+- **Solo CEF tabs**: Funciona exclusivamente en tabs Chromium (Meet, Zoom, Teams)
+
+### Chrome Light Theme
+- Nuevo theme `.chromeLight` con ~30 propiedades de color (fondo blanco, texto oscuro, syntax highlighting apropiado)
+- Theme por defecto cambiado a Chrome Light
+- `var isDark: Bool { self != .chromeLight }` controla colorScheme condicional
+
+### Dock Lateral + Drag Handle
+- DevTools dockable lateral ocupa 54% del ancho de ventana (igual que Chrome)
+- GeometryReader con `@State containerSize` (no `@Published` — evita render loop infinito)
+- Drag handle offset-based: durante arrastre solo mueve línea visual via `.offset()`, aplica tamaño real en `.onEnded`
+- `clampedOffset` + `.zIndex(100)` evitan que el handle desaparezca o se pierda
+- Indicador de tamaño en px y % durante arrastre
+
+### Console REPL (ejecutar JavaScript)
+- `eval()` wrapper completo: maneja Promises, DOM nodes, NodeList, functions con serialización
+- Niveles `.input` (› azul) y `.output` (← gris) diferenciados visualmente
+- `escapeForJS()` helper para strings seguros
+
+### Performance Panel (NUEVO)
+- Summary: score circle, Core Web Vitals (FCP, LCP, Load), timing breakdown bars
+- Timeline: resource bars coloreados por tipo (script, style, image, font, etc.)
+- Resources: conteo por tipo + top 10 más lentos
+- DOM stats: nodos, profundidad, listeners, memoria
+- Recomendaciones automáticas
+
+### Memory Panel (NUEVO)
+- Heap snapshots: captura DOM nodes, detached nodes, event listeners, timers, iframes
+- IDs duplicados, nodos más grandes, leak warnings automáticos
+- Comparación de snapshots con delta cards (verde/rojo)
+- Health score visual
+
+### Network Throttling
+- `NetworkThrottleProfile` enum: None, Fast 3G, Slow 3G, Offline, Custom
+- Intercepta fetch/XHR con setTimeout para simular latencia
+- Banner de advertencia cuando throttling activo
+
+### Lighthouse Auditorías (NUEVO)
+- 4 categorías × 8 audits = 32 auditorías totales
+- **Performance**: FCP, load time, TTFB, DOM ready, recursos, render-blocking, DOM size, imágenes sin dimensiones
+- **Accesibilidad**: alt text, labels, lang, headings, H1 único, contraste, landmarks ARIA, tabindex
+- **Best Practices**: HTTPS, errores consola, doctype, charset, HTML deprecado, viewport, mixed content, noopener
+- **SEO**: título, meta description, canonical, H1, link text, Open Graph, robots, mobile-friendly
+- Score circles por categoría con colores (verde/naranja/rojo)
+
+### Device Emulation (NUEVO)
+- 7 perfiles: iPhone 14, iPhone 14 Pro Max, iPad Air, iPad Pro, Pixel 7, Galaxy S23, Responsive
+- Inyección JS: viewport meta + CSS override + `Object.defineProperty` screen/window + UA spoofing + touch events
+- Toggle landscape/portrait
+
+### Pendiente (requiere CDP)
+- **JS Debugger con breakpoints**: único feature del gap analysis que requiere Chrome DevTools Protocol real, no simulable con JavaScript injection
+
+---
+
+## v0.9.3 (2026-03-09) — Sesiones Crash-Proof, Anti-Fingerprinting, Password Manager, DevTools, Data Portability
+
+### Sesiones Crash-Proof (SessionManager.swift — NUEVO)
+- **Guardado automático**: Cada 30s + al completar cada navegación (`didFinish`) + al cerrar la app (`applicationWillTerminate`)
+- **Banner de restauración**: Al iniciar, banner azul "¿Restaurar N pestañas?" con botones "Restaurar" / "Descartar" (estilo Chrome)
+- **Multi-ventana**: Guarda y restaura tabs de ventana principal + ventanas adicionales de WindowManager
+- **Privacidad**: Excluye tabs y ventanas incógnito del guardado
+- **Expiración**: Sesión válida máximo 7 días
+- **Setting**: Preferencias → Sesión → "Restaurar pestañas al iniciar" (activado por defecto)
+- **Archivo**: `~/Library/Application Support/MAI/session.json`
+
+### Diálogo CEF de Reuniones Simultáneas (BrowserState.swift)
+- **Problema**: Al abrir Teams mientras Meet estaba activo, se reemplazaba silenciosamente el tab
+- **Solución**: Diálogo con 3 opciones claras sin jerga técnica:
+  - "Reemplazar reunión" — cierra la actual, abre nueva con experiencia completa
+  - "Abrir en modo nativo" — mantiene reunión actual, abre nueva con audio/video (WebKit)
+  - "Cancelar"
+- **Fix loop infinito**: Flag `forceWebKit` en Tab evita re-detección en BrowserState.navigate() y WebViewContainer.decidePolicyFor()
+- **Investigación**: Usuarios sí necesitan múltiples reuniones (monitoreo pasivo, solapamiento). Google Meet y Zoom lo permiten nativamente.
+
+### Navegación con Teclado en Sugerencias (AddressBar.swift)
+- **Problema**: Flechas arriba/abajo no funcionaban para navegar sugerencias en URL bar
+- **Causa raíz**: NSTextField en modo edición delega al field editor (NSTextView interno) que captura las flechas para mover el cursor de texto. `keyDown` del NSTextField nunca se ejecutaba.
+- **Fix**: Interceptar en `control(_:textView:doCommandBy:)` del delegate — captura `moveDown:`, `moveUp:`, `cancelOperation:` (escape)
+
+### Phishing Detector — Whitelist Dominios Seguros (PhishingDetector.swift)
+- **Problema**: `statics.teams.cdn.live.net` marcado como sospechoso (falso positivo por "exceso de subdominios")
+- **Fix**: Lista de ~25 dominios legítimos (Microsoft CDNs, Google, Zoom, Apple, Cloudflare) que usan muchos subdominios por diseño
+- **Método**: `isKnownSafeDomain()` verifica suffix match, bypass completo del análisis heurístico
+
+### MeetingIndicator Sutil (BrowserView.swift)
+- **Antes**: `ChromiumEngineIndicator` — barra grande con texto técnico "Motor Chromium activo"
+- **Ahora**: `MeetingIndicator` — punto verde + "Reunión activa — [servicio]" + botón "Cerrar al terminar"
+- **Método estático**: `BrowserState.videoConferenceServiceName(for:)` para resolución de nombres sin instancia
+
+### Anti-Fingerprinting Real (AntiFingerprintManager.swift — NUEVO)
+- **3 niveles de protección**: Standard, Strong, Maximum
+- **12 vectores protegidos**: Canvas, WebGL, Audio, Navigator, Screen, Fonts, MediaDevices, Speech, WebGPU, ClientRects, Connection API, Battery
+- **Farbling determinístico**: Seed de sesión (UInt32.random) + PRNG Mulberry32 por dominio — misma huella por sesión+dominio, diferente entre sesiones
+- **Anti-detección**: Function.prototype.toString spoofing para que los overrides parezcan nativos
+- **Integración**: WKUserScript inyectado en `documentStart`, allFrames, via `WebViewContainer.createConfiguration()`
+- **Settings**: Picker con 4 opciones (Desactivado/Estándar/Fuerte/Máximo) + descripción del nivel
+
+### Tab Intelligence (BrowserState.swift)
+- **Detectar duplicados**: `findDuplicateTabs()` — normaliza URLs (quita trailing slash, fragmentos, www) y agrupa por URL
+- **Cerrar duplicados**: `closeDuplicateTabs()` — mantiene el tab más reciente, cierra los demás
+- **Búsqueda de tabs**: `searchTabs(query:)` — busca en título y URL, case-insensitive
+- **Normalización**: `normalizeURL()` — quita esquema, www, trailing slash, fragmentos para comparación
+- **UI**: Click derecho en tab → "Cerrar Tabs Duplicadas" con ícono `doc.on.doc`
+
+### Data Portability (DataPortabilityManager.swift — NUEVO)
+- **Export bookmarks JSON**: Array de `BookmarkEntry` con título, URL, fecha
+- **Export bookmarks HTML**: Formato Netscape (compatible Chrome/Firefox/Safari import)
+- **Import bookmarks HTML**: Parsea `<DT><A HREF="...">` del formato Netscape estándar
+- **Export historial JSON**: Array de `HistoryEntry` con URL, título, fecha, frecuencia
+- **Export todo**: JSON combinado con bookmarks + historial + workspaces
+- **Settings**: Sección "Portabilidad de Datos" con botones de export/import y NSSavePanel/NSOpenPanel
+
+### Password Manager (PasswordManager.swift — NUEVO)
+- **Almacenamiento**: macOS Keychain (Security framework) con `kSecClassInternetPassword`
+- **Captura automática**: JS intercepta `submit` en forms con campos de password → `window.webkit.messageHandlers`
+- **Banner "¿Guardar contraseña?"**: Barra naranja con botones Guardar/No, se muestra tras detectar credenciales
+- **Auto-fill**: JS inyecta username/password en campos de login con `dispatchEvent(new Event('input'))` para React/Vue
+- **Detección de login**: Script detecta si la página tiene formulario de login para trigger auto-fill
+- **CRUD**: save, get (por host), getAll, delete, deleteAll via SecItem* APIs
+- **Privacidad**: Skip completo en modo incógnito
+- **Settings**: Toggle + contador de contraseñas guardadas
+
+### DevTools (MAIApp.swift + BrowserView.swift + WebViewContainer.swift)
+- **Menú "Desarrollo"**: Nuevo menú en barra de la app con 3 opciones
+- **Consola JavaScript (Cmd+Option+J)**: `JSConsoleView` — panel interactivo para ejecutar JS en el tab actual
+  - Input con campo de texto + botón Ejecutar
+  - Historial de comandos y resultados con scroll
+  - Ejecuta vía `webView.evaluateJavaScript()` en el WKWebView activo
+- **Inspeccionar Elemento (Cmd+Option+I)**: Abre la Consola JavaScript (WKWebView no expone Inspector programáticamente)
+- **Ver Código Fuente (Cmd+Option+U)**: Obtiene HTML con `document.documentElement.outerHTML`, genera página con tema oscuro y syntax highlighting, abre en nuevo tab MAI (no en app externa)
+- **isInspectable**: `webView.isInspectable = true` (macOS 13.3+) permite conexión de Safari Web Inspector
+
+### Doble Click para Maximizar (MAIApp.swift)
+- **Problema**: Con `titlebarAppearsTransparent` y contenido fullSize, doble click en titlebar no maximizaba
+- **Fix**: Monitor local de eventos `NSEvent.addLocalMonitorForEvents` detecta doble click en zona superior (38px)
+- **Respeta preferencia del sistema**: `AppleActionOnDoubleClick` — zoom o minimize según configuración del usuario
 
 ---
 

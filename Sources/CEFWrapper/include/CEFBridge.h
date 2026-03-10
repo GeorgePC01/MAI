@@ -22,6 +22,19 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)cefBrowserRendererCrashedWithStatus:(int)status;
 @end
 
+/// Delegate protocol for Chrome DevTools Protocol (CDP) events
+@protocol CEFBridgeCDPDelegate <NSObject>
+@optional
+/// Response to a command sent via cdpSendMethod
+- (void)cdpDidReceiveMethodResult:(int)messageId success:(BOOL)success result:(NSString *)resultJson;
+/// Async event from CDP (e.g. Debugger.paused, Debugger.scriptParsed)
+- (void)cdpDidReceiveEvent:(NSString *)method params:(NSString *)paramsJson;
+/// DevTools agent attached (ready to receive commands)
+- (void)cdpDidAttach;
+/// DevTools agent detached
+- (void)cdpDidDetach;
+@end
+
 /// Bridge between CEF C API and Swift/Objective-C
 @interface CEFBridge : NSObject
 
@@ -83,6 +96,23 @@ NS_ASSUME_NONNULL_BEGIN
 
 /// Get the current title of the active CEF browser
 + (nullable NSString *)currentTitle;
+
+// MARK: - CDP (Chrome DevTools Protocol)
+
+/// Set delegate for CDP events
++ (void)setCDPDelegate:(nullable id<CEFBridgeCDPDelegate>)delegate;
+
+/// Attach CDP observer to the active CEF browser
+/// @return YES if observer was attached successfully
++ (BOOL)cdpAttach;
+
+/// Detach CDP observer
++ (void)cdpDetach;
+
+/// Send a CDP command (JSON-RPC). Returns message ID (>0) on success, 0 on failure.
+/// @param method CDP method name (e.g. "Debugger.enable", "Debugger.setBreakpointByUrl")
+/// @param paramsJson JSON string of params (e.g. "{\"lineNumber\":42,\"url\":\"...\"}")
++ (int)cdpSendMethod:(NSString *)method params:(nullable NSString *)paramsJson;
 
 @end
 
