@@ -410,6 +410,11 @@ struct TabItem: View {
             }
             .disabled(browserState.tabs.last?.id == tab.id)
 
+            Button(action: { browserState.closeDuplicateTabs() }) {
+                Label("Cerrar Tabs Duplicadas", systemImage: "doc.on.doc")
+            }
+            .disabled(browserState.findDuplicateTabs().isEmpty)
+
             Button(action: onClose) {
                 Label("Cerrar Tab", systemImage: "xmark")
             }

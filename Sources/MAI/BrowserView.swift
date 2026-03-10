@@ -27,6 +27,18 @@ struct BrowserView: View {
                     .tint(.blue)
             }
 
+            // Banner de guardar contraseña
+            if let credential = browserState.pendingCredential {
+                PasswordSaveBanner(credential: credential)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            // Banner de restauración de sesión
+            if browserState.showSessionRestore {
+                SessionRestoreBanner()
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // Barra de búsqueda en página (Cmd+F)
             if browserState.showFindInPage {
                 FindInPageBar()
@@ -60,17 +72,19 @@ struct BrowserView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
 
-            // Contenido principal
-            HStack(spacing: 0) {
-                // Sidebar opcional
-                if browserState.showSidebar {
-                    SidebarView()
-                        .frame(width: 250)
-                        .transition(.move(edge: .leading))
-                }
+            // Contenido principal con DevTools dockable
+            DevToolsDockLayout {
+                HStack(spacing: 0) {
+                    // Sidebar opcional
+                    if browserState.showSidebar {
+                        SidebarView()
+                            .frame(width: 250)
+                            .transition(.move(edge: .leading))
+                    }
 
-                // WebView
-                WebViewContainer()
+                    // WebView
+                    WebViewContainer()
+                }
             }
 
             // Banner de traducción
@@ -95,6 +109,163 @@ struct BrowserView: View {
                 WindowManager.shared.registerMainWindow(state: browserState)
             }
         }
+    }
+}
+
+/// Layout que posiciona DevTools abajo, a la derecha o a la izquierda del contenido principal
+struct DevToolsDockLayout<Content: View>: View {
+    @EnvironmentObject var browserState: BrowserState
+    @ObservedObject private var devToolsState = DevToolsState.shared
+    let content: () -> Content
+
+    init(@ViewBuilder content: @escaping () -> Content) {
+        self.content = content
+    }
+
+    @State private var containerSize: CGSize = .zero
+
+    var body: some View {
+        GeometryReader { geometry in
+            let lateralWidth = devToolsState.devToolsSize
+            Group {
+                if browserState.showDevTools {
+                    switch devToolsState.dockPosition {
+                    case .bottom:
+                        VStack(spacing: 0) {
+                            content()
+                            DevToolsResizeHandle(isHorizontal: true, containerSize: containerSize)
+                            DevToolsView()
+                                .frame(height: devToolsState.devToolsSize)
+                                .transition(.move(edge: .bottom))
+                        }
+                    case .right:
+                        HStack(spacing: 0) {
+                            content()
+                            DevToolsResizeHandle(isHorizontal: false, containerSize: containerSize)
+                            DevToolsView()
+                                .frame(width: lateralWidth)
+                                .transition(.move(edge: .trailing))
+                        }
+                    case .left:
+                        HStack(spacing: 0) {
+                            DevToolsView()
+                                .frame(width: lateralWidth)
+                                .transition(.move(edge: .leading))
+                            DevToolsResizeHandle(isHorizontal: false, containerSize: containerSize)
+                            content()
+                        }
+                    }
+                } else {
+                    content()
+                }
+            }
+            .animation(nil, value: devToolsState.devToolsSize)
+            .onChange(of: geometry.size.width) { newWidth in
+                containerSize = geometry.size
+                devToolsState.windowWidth = newWidth
+            }
+            .onAppear {
+                containerSize = geometry.size
+                devToolsState.windowWidth = geometry.size.width
+                // Si está en modo lateral, asegurar tamaño inicial de 54%
+                if devToolsState.dockPosition != .bottom {
+                    let targetSize = geometry.size.width * 0.54
+                    if devToolsState.devToolsSize < targetSize {
+                        devToolsState.devToolsSize = targetSize
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Barra de redimensión arrastrable entre WebView y DevTools
+/// Técnica: durante el drag solo mueve una línea visual (overlay), aplica el tamaño real al soltar.
+/// Esto evita que WKWebView se redimensione en cada pixel del drag (causa del temblor).
+struct DevToolsResizeHandle: View {
+    let isHorizontal: Bool
+    var containerSize: CGSize = .zero
+    @ObservedObject private var devToolsState = DevToolsState.shared
+    @State private var dragOffset: CGFloat = 0
+    @State private var isDragging: Bool = false
+
+    private var clampedOffset: CGFloat {
+        let maxSize = isHorizontal
+            ? containerSize.height * 0.85
+            : containerSize.width * 0.85
+        let newSize = devToolsState.devToolsSize + dragOffset
+        let clamped = min(maxSize, max(200, newSize))
+        return clamped - devToolsState.devToolsSize
+    }
+
+    private var previewSize: CGFloat {
+        devToolsState.devToolsSize + clampedOffset
+    }
+
+    private var sizeLabel: String {
+        let total = isHorizontal ? containerSize.height : containerSize.width
+        let pct = total > 0 ? Int(previewSize / total * 100) : 0
+        return "\(Int(previewSize))px — \(pct)%"
+    }
+
+    var body: some View {
+        Rectangle()
+            .fill(isDragging ? DT.link : DT.border)
+            .frame(
+                width: isHorizontal ? nil : 5,
+                height: isHorizontal ? 5 : nil
+            )
+            .contentShape(Rectangle().inset(by: -4))
+            .onHover { hovering in
+                if hovering {
+                    if isHorizontal {
+                        NSCursor.resizeUpDown.push()
+                    } else {
+                        NSCursor.resizeLeftRight.push()
+                    }
+                } else {
+                    NSCursor.pop()
+                }
+            }
+            .overlay(
+                Group {
+                    if isDragging {
+                        Text(sizeLabel)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.black.opacity(0.85))
+                            .cornerRadius(6)
+                            .fixedSize()
+                            .allowsHitTesting(false)
+                    }
+                }
+            )
+            .zIndex(isDragging ? 100 : 0)
+            .offset(
+                x: !isHorizontal && isDragging ? (devToolsState.dockPosition == .right ? -clampedOffset : clampedOffset) : 0,
+                y: isHorizontal && isDragging ? -clampedOffset : 0
+            )
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        isDragging = true
+                        if isHorizontal {
+                            dragOffset = -value.translation.height
+                        } else if devToolsState.dockPosition == .right {
+                            dragOffset = -value.translation.width
+                        } else {
+                            dragOffset = value.translation.width
+                        }
+                    }
+                    .onEnded { _ in
+                        // Aplicar tamaño final de una sola vez
+                        devToolsState.devToolsSize = previewSize
+                        dragOffset = 0
+                        isDragging = false
+                    }
+            )
     }
 }
 
@@ -1180,6 +1351,115 @@ struct ChromeCompatIndicator: View {
 }
 
 /// Indicador discreto de reunión activa — reemplaza el viejo "Chromium Engine Indicator"
+
+struct PasswordSaveBanner: View {
+    @EnvironmentObject var browserState: BrowserState
+    let credential: PendingCredential
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 14))
+                .foregroundColor(.orange)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("¿Guardar contraseña?")
+                    .font(.system(size: 12, weight: .medium))
+                Text("\(credential.username) en \(credential.host)")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button(action: {
+                let _ = PasswordManager.shared.saveCredential(
+                    host: credential.host,
+                    username: credential.username,
+                    password: credential.password
+                )
+                withAnimation(.easeOut(duration: 0.2)) {
+                    browserState.pendingCredential = nil
+                }
+            }) {
+                Text("Guardar")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(Color.orange)
+                    .cornerRadius(5)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    browserState.pendingCredential = nil
+                }
+            }) {
+                Text("No")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.08))
+    }
+}
+
+struct SessionRestoreBanner: View {
+    @EnvironmentObject var browserState: BrowserState
+    private let tabCount = SessionManager.shared.savedTabCount
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.counterclockwise.circle.fill")
+                .font(.system(size: 14))
+                .foregroundColor(.blue)
+
+            Text("Se cerró inesperadamente. ¿Restaurar \(tabCount) pestaña\(tabCount == 1 ? "" : "s")?")
+                .font(.system(size: 12))
+                .lineLimit(1)
+
+            Spacer()
+
+            Button(action: {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    browserState.showSessionRestore = false
+                }
+                let _ = SessionManager.shared.restoreSession(into: browserState)
+            }) {
+                Text("Restaurar")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+                    .background(Color.blue)
+                    .cornerRadius(5)
+            }
+            .buttonStyle(.plain)
+
+            Button(action: {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    browserState.showSessionRestore = false
+                }
+                SessionManager.shared.clearSession()
+            }) {
+                Text("Descartar")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.blue.opacity(0.08))
+    }
+}
+
 struct MeetingIndicator: View {
     @EnvironmentObject var browserState: BrowserState
 

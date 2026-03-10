@@ -208,13 +208,28 @@ class WebViewConfigurationManager {
             config.preferences.isTextInteractionEnabled = true
         }
 
-        // Inyectar script anti-detección al inicio de cada página
+        // Inyectar script anti-detección básico (navigator spoofing)
         let antiDetectionScript = WKUserScript(
             source: Self.navigatorSpoofingScript,
             injectionTime: .atDocumentStart,
             forMainFrameOnly: false  // También en iframes (importante para OAuth)
         )
         config.userContentController.addUserScript(antiDetectionScript)
+
+        // Anti-fingerprinting engine (canvas, WebGL, audio, fonts, screen, etc.)
+        if let afpScript = AntiFingerprintManager.shared.userScript() {
+            config.userContentController.addUserScript(afpScript)
+        }
+
+        // Password capture script (detecta envío de formularios con contraseña)
+        if PasswordManager.shared.isEnabled {
+            let pwScript = WKUserScript(
+                source: PasswordManager.captureScript,
+                injectionTime: .atDocumentEnd,
+                forMainFrameOnly: true
+            )
+            config.userContentController.addUserScript(pwScript)
+        }
 
         // GPC (Global Privacy Control) + Cookie Banner auto-dismiss
         let cookieBanner = CookieBannerManager.shared
@@ -391,6 +406,21 @@ struct WebViewRepresentable: NSViewRepresentable {
             config.userContentController.add(context.coordinator, name: "cookieBannerDismissed")
         }
 
+        // Register password capture message handler
+        if PasswordManager.shared.isEnabled {
+            config.userContentController.add(context.coordinator, name: "passwordCapture")
+        }
+
+        // Register DevTools message handlers (console log + network interception)
+        config.userContentController.add(context.coordinator, name: "maiDevToolsConsole")
+        config.userContentController.add(context.coordinator, name: "maiDevToolsNetwork")
+
+        // Auto-inject DevTools scripts on every page load (atDocumentStart = before page JS runs)
+        let consoleScript = WKUserScript(source: DevToolsScripts.consoleInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        let networkScript = WKUserScript(source: DevToolsScripts.networkInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+        config.userContentController.addUserScript(consoleScript)
+        config.userContentController.addUserScript(networkScript)
+
         // Crear WebView con configuración compartida
         let webView = WKWebView(frame: .zero, configuration: config)
         webView.navigationDelegate = context.coordinator
@@ -400,6 +430,13 @@ struct WebViewRepresentable: NSViewRepresentable {
 
         // Forzar que WKWebView siga el tema del sistema (no heredar de la app)
         webView.underPageBackgroundColor = NSColor.textBackgroundColor
+
+        // Habilitar Web Inspector (DevTools) si está activado en Settings
+        if UserDefaults.standard.bool(forKey: "enableDeveloperTools") {
+            if #available(macOS 13.3, *) {
+                webView.isInspectable = true
+            }
+        }
 
         // Check if this domain has Chrome compat mode saved
         let useChromeCompat = BrowserState.shouldUseChromeCompat(for: tab.url)
@@ -458,7 +495,58 @@ struct WebViewRepresentable: NSViewRepresentable {
                 YouTubeAdBlockManager.shared.incrementAdsBlocked()
             } else if message.name == "cookieBannerDismissed" {
                 CookieBannerManager.shared.bannersBlocked += 1
+            } else if message.name == "passwordCapture" {
+                handlePasswordCapture(message)
+            } else if message.name == "maiDevToolsConsole" {
+                handleDevToolsConsole(message)
+            } else if message.name == "maiDevToolsNetwork" {
+                handleDevToolsNetwork(message)
             }
+        }
+
+        private func handleDevToolsConsole(_ message: WKScriptMessage) {
+            guard let body = message.body as? [String: Any],
+                  let levelStr = body["level"] as? String,
+                  let msg = body["message"] as? String else { return }
+
+            let level: ConsoleLogLevel
+            switch levelStr {
+            case "warn": level = .warn
+            case "error": level = .error
+            case "info": level = .info
+            case "debug": level = .debug
+            default: level = .log
+            }
+
+            let source = body["source"] as? String
+            let entry = ConsoleLogEntry(
+                timestamp: Date(), level: level,
+                message: msg, source: source, line: nil
+            )
+            DevToolsState.shared.addLog(entry)
+        }
+
+        private func handleDevToolsNetwork(_ message: WKScriptMessage) {
+            guard let body = message.body as? [String: Any],
+                  let url = body["url"] as? String else { return }
+
+            let duration = body["duration"] as? Int ?? 0
+            let entry = NetworkEntry(
+                timestamp: Date(),
+                method: body["method"] as? String ?? "GET",
+                url: url,
+                status: body["status"] as? Int ?? 0,
+                type: body["type"] as? String ?? "other",
+                size: NetworkPanel.formatBytes(body["size"] as? Int ?? 0),
+                duration: "\(duration)ms",
+                initiator: body["initiator"] as? String ?? "",
+                startTime: body["startTime"] as? Int ?? 0,
+                connectEnd: body["connectEnd"] as? Int ?? 0,
+                requestStart: body["requestStart"] as? Int ?? 0,
+                responseStart: body["responseStart"] as? Int ?? 0,
+                responseEnd: body["responseEnd"] as? Int ?? (body["startTime"] as? Int ?? 0) + duration
+            )
+            DevToolsState.shared.addNetworkEntry(entry)
         }
 
         func setupObservers(for webView: WKWebView) {
@@ -532,6 +620,15 @@ struct WebViewRepresentable: NSViewRepresentable {
             tab.isLoading = false
             browserState.isLoading = false
             tab.recordInteraction()
+
+            // Guardar sesión al completar navegación
+            SessionManager.shared.saveSession(mainState: browserState)
+
+            // Auto-fill de contraseñas si hay credenciales guardadas
+            if PasswordManager.shared.isEnabled && !tab.isIncognito,
+               let host = webView.url?.host {
+                autoFillPassword(webView: webView, host: host)
+            }
 
             // Si terminamos de cargar SafeLinks, extraer y navegar a URL real
             if let currentURL = webView.url,
@@ -694,6 +791,45 @@ struct WebViewRepresentable: NSViewRepresentable {
         }
 
         /// Extrae la URL real de Microsoft SafeLinks
+        // MARK: - Password Manager
+
+        private func handlePasswordCapture(_ message: WKScriptMessage) {
+            guard let body = message.body as? [String: String],
+                  let host = body["host"],
+                  let username = body["username"],
+                  let password = body["password"],
+                  !tab.isIncognito else { return }
+
+            // Verificar si ya existe esta credencial exacta
+            let existing = PasswordManager.shared.getCredentials(for: host)
+            if existing.contains(where: { $0.username == username && $0.password == password }) {
+                return // Ya guardada
+            }
+
+            // Mostrar banner para guardar
+            DispatchQueue.main.async { [weak self] in
+                self?.browserState.pendingCredential = PendingCredential(
+                    host: host, username: username, password: password
+                )
+            }
+        }
+
+        private func autoFillPassword(webView: WKWebView, host: String) {
+            let credentials = PasswordManager.shared.getCredentials(for: host)
+            guard let cred = credentials.first else { return }
+
+            // Primero detectar si hay formulario de login
+            webView.evaluateJavaScript(PasswordManager.detectLoginFormScript) { [weak self] result, _ in
+                guard let hasLogin = result as? Bool, hasLogin else { return }
+                let fillScript = PasswordManager.autoFillScript(username: cred.username, password: cred.password)
+                webView.evaluateJavaScript(fillScript) { _, error in
+                    if error == nil {
+                        print("🔑 Auto-fill aplicado en \(host)")
+                    }
+                }
+            }
+        }
+
         private func extractSafeLinksURL(from url: URL) -> URL? {
             guard let host = url.host?.lowercased(),
                   host.contains("safelinks.protection.outlook.com") else {

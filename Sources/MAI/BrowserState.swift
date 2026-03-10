@@ -15,6 +15,15 @@ class BrowserState: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var loadingProgress: Double = 0
 
+    // Restauración de sesión
+    @Published var showSessionRestore: Bool = false
+
+    // Password Manager — credencial pendiente de guardar
+    @Published var pendingCredential: PendingCredential?
+
+    // DevTools — panel completo con consola, elementos, red, almacenamiento, fuentes
+    @Published var showDevTools: Bool = false
+
     // Estado de detección de phishing
     @Published var showPhishingWarning: Bool = false
     @Published var pendingPhishingURL: String = ""
@@ -139,6 +148,60 @@ class BrowserState: ObservableObject {
 
     func moveTab(from source: IndexSet, to destination: Int) {
         tabs.move(fromOffsets: source, toOffset: destination)
+    }
+
+    // MARK: - Tab Intelligence
+
+    /// Encuentra tabs duplicados (misma URL base, ignorando fragmentos y query params)
+    func findDuplicateTabs() -> [(original: Int, duplicate: Int)] {
+        var seen: [String: Int] = [:]
+        var duplicates: [(original: Int, duplicate: Int)] = []
+        for (index, tab) in tabs.enumerated() {
+            let normalized = normalizeURL(tab.url)
+            guard !normalized.isEmpty, normalized != "about:blank" else { continue }
+            if let originalIndex = seen[normalized] {
+                duplicates.append((original: originalIndex, duplicate: index))
+            } else {
+                seen[normalized] = index
+            }
+        }
+        return duplicates
+    }
+
+    /// Cierra todas las tabs duplicadas (mantiene la primera aparición)
+    func closeDuplicateTabs() {
+        let duplicates = findDuplicateTabs()
+        // Cerrar de atrás hacia adelante para no desplazar índices
+        for dup in duplicates.reversed() {
+            closeTab(at: dup.duplicate, force: false)
+        }
+        if !duplicates.isEmpty {
+            print("🧹 \(duplicates.count) tabs duplicadas cerradas")
+        }
+    }
+
+    /// Normaliza URL para comparación de duplicados (quita fragmento y parámetros de tracking)
+    private func normalizeURL(_ urlString: String) -> String {
+        guard var components = URLComponents(string: urlString) else { return urlString }
+        components.fragment = nil
+        // Remover parámetros de tracking comunes
+        let trackingParams: Set<String> = ["utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term", "ref", "fbclid", "gclid"]
+        if let items = components.queryItems {
+            let filtered = items.filter { !trackingParams.contains($0.name) }
+            components.queryItems = filtered.isEmpty ? nil : filtered
+        }
+        return components.url?.absoluteString ?? urlString
+    }
+
+    /// Busca tabs por título o URL (para búsqueda rápida de tabs)
+    func searchTabs(query: String) -> [(index: Int, tab: Tab)] {
+        let q = query.lowercased()
+        return tabs.enumerated().compactMap { index, tab in
+            if tab.title.lowercased().contains(q) || tab.url.lowercased().contains(q) {
+                return (index: index, tab: tab)
+            }
+            return nil
+        }
     }
 
     func duplicateTab(_ tab: Tab) {

@@ -65,6 +65,33 @@ struct GeneralSettingsView: View {
                 Toggle("Confirmar al cerrar múltiples pestañas", isOn: .constant(true))
             }
 
+            Section("Contraseñas") {
+                Toggle("Guardar contraseñas", isOn: Binding(
+                    get: { PasswordManager.shared.isEnabled },
+                    set: { PasswordManager.shared.isEnabled = $0 }
+                ))
+                Text("Ofrece guardar contraseñas al iniciar sesión en sitios web. Almacenadas en Keychain de macOS.")
+                    .font(.caption).foregroundColor(.secondary)
+
+                HStack {
+                    Label("\(PasswordManager.shared.savedCount) contraseñas guardadas", systemImage: "key.fill")
+                    Spacer()
+                    Button("Ver contraseñas") {
+                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+
+            Section("Sesión") {
+                Toggle("Restaurar pestañas al iniciar", isOn: Binding(
+                    get: { SessionManager.shared.restoreSessionOnLaunch },
+                    set: { SessionManager.shared.restoreSessionOnLaunch = $0 }
+                ))
+                Text("Al abrir MAI, restaura las pestañas de la sesión anterior")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+
             Section("Traducción") {
                 VStack(alignment: .leading, spacing: 4) {
                     Toggle("Ofrecer traducir páginas en otro idioma", isOn: Binding(
@@ -261,9 +288,20 @@ struct PrivacySettingsView: View {
                 }
             }
 
-            Section("Protección") {
+            Section("Anti-Fingerprinting") {
+                Picker("Nivel de protección", selection: Binding(
+                    get: { AntiFingerprintManager.shared.protectionLevel },
+                    set: { AntiFingerprintManager.shared.protectionLevel = $0 }
+                )) {
+                    ForEach(FingerprintProtectionLevel.allCases, id: \.rawValue) { level in
+                        Text(level.displayName).tag(level)
+                    }
+                }
+                Text(AntiFingerprintManager.shared.protectionLevel.description)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
                 Toggle("DNS sobre HTTPS", isOn: $dnsOverHTTPS)
-                Toggle("Protección contra fingerprinting", isOn: $privacyManager.fingerprintProtection)
             }
 
             Section("Estadísticas") {
@@ -429,14 +467,35 @@ struct AdvancedSettingsView: View {
                 }
             }
 
+            Section("Datos") {
+                Button("Exportar Favoritos (JSON)") {
+                    DataPortabilityManager.shared.exportBookmarksJSON()
+                }
+                Button("Exportar Favoritos (HTML — compatible Chrome/Firefox)") {
+                    DataPortabilityManager.shared.exportBookmarksHTML()
+                }
+                Button("Importar Favoritos (HTML)") {
+                    DataPortabilityManager.shared.importBookmarksHTML()
+                }
+
+                Divider()
+
+                Button("Exportar Historial (JSON)") {
+                    DataPortabilityManager.shared.exportHistoryJSON()
+                }
+                Button("Exportar Todos los Datos") {
+                    DataPortabilityManager.shared.exportAllData()
+                }
+            }
+
             Section("Desarrollo") {
                 Toggle("Habilitar herramientas de desarrollador", isOn: $enableDeveloperTools)
             }
 
             Section("Información") {
-                LabeledContent("Versión", value: "0.8.0-alpha")
-                LabeledContent("Motor", value: "WebKit + CEF")
-                LabeledContent("Build", value: "2026.03.02")
+                LabeledContent("Versión", value: "0.9.3")
+                LabeledContent("Motor", value: "WebKit + CEF (Chromium 145)")
+                LabeledContent("Build", value: "2026.03.09")
             }
         }
         .padding()
