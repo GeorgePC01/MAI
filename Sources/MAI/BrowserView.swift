@@ -27,10 +27,19 @@ struct BrowserView: View {
                     .tint(.blue)
             }
 
-            // Banner de guardar contraseña
+            // Banner de guardar contraseña (auto-dismiss 60s — ISO 27001 A.11.2.8)
             if let credential = browserState.pendingCredential {
                 PasswordSaveBanner(credential: credential)
                     .transition(.move(edge: .top).combined(with: .opacity))
+                    .onAppear {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
+                            if browserState.pendingCredential != nil {
+                                withAnimation(.easeOut(duration: 0.2)) {
+                                    browserState.pendingCredential = nil
+                                }
+                            }
+                        }
+                    }
             }
 
             // Banner de restauración de sesión
@@ -1355,58 +1364,99 @@ struct ChromeCompatIndicator: View {
 struct PasswordSaveBanner: View {
     @EnvironmentObject var browserState: BrowserState
     let credential: PendingCredential
+    @State private var breachCount: Int = 0
+    @State private var breachChecked: Bool = false
+
+    /// NIST 800-63B: evalúa fortaleza de la contraseña
+    private var passwordStrength: (label: String, color: Color) {
+        let p = credential.password
+        if p.count < 8 { return ("Contraseña débil", .red) }
+        var score = 0
+        if p.count >= 12 { score += 1 }
+        if p.range(of: "[A-Z]", options: .regularExpression) != nil { score += 1 }
+        if p.range(of: "[0-9]", options: .regularExpression) != nil { score += 1 }
+        if p.range(of: "[^a-zA-Z0-9]", options: .regularExpression) != nil { score += 1 }
+        if score >= 3 { return ("Contraseña fuerte", .green) }
+        return ("Contraseña aceptable", .orange)
+    }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: "key.fill")
-                .font(.system(size: 14))
-                .foregroundColor(.orange)
+        VStack(spacing: 0) {
+            HStack(spacing: 10) {
+                Image(systemName: "key.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.orange)
 
-            VStack(alignment: .leading, spacing: 1) {
-                Text("¿Guardar contraseña?")
-                    .font(.system(size: 12, weight: .medium))
-                Text("\(credential.username) en \(credential.host)")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            Button(action: {
-                let _ = PasswordManager.shared.saveCredential(
-                    host: credential.host,
-                    username: credential.username,
-                    password: credential.password
-                )
-                withAnimation(.easeOut(duration: 0.2)) {
-                    browserState.pendingCredential = nil
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text("¿Guardar contraseña?")
+                            .font(.system(size: 12, weight: .medium))
+                        // NIST 800-63B: indicador de fortaleza
+                        Text(passwordStrength.label)
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(passwordStrength.color)
+                    }
+                    Text("\(credential.username) en \(credential.host)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
                 }
-            }) {
-                Text("Guardar")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 4)
-                    .background(Color.orange)
-                    .cornerRadius(5)
-            }
-            .buttonStyle(.plain)
 
-            Button(action: {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    browserState.pendingCredential = nil
+                Spacer()
+
+                Button(action: {
+                    let _ = PasswordManager.shared.saveCredential(
+                        host: credential.host,
+                        username: credential.username,
+                        password: credential.password
+                    )
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        browserState.pendingCredential = nil
+                    }
+                }) {
+                    Text("Guardar")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 4)
+                        .background(Color.orange)
+                        .cornerRadius(5)
                 }
-            }) {
-                Text("No")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
+                .buttonStyle(.plain)
+
+                Button(action: {
+                    withAnimation(.easeOut(duration: 0.2)) {
+                        browserState.pendingCredential = nil
+                    }
+                }) {
+                    Text("No")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
             }
-            .buttonStyle(.plain)
+
+            // NIST 800-63B §5.1.1.2: Advertencia de contraseña filtrada
+            if breachChecked && breachCount > 0 {
+                HStack(spacing: 4) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 10))
+                    Text("Esta contraseña apareció en \(breachCount.formatted()) filtraciones conocidas")
+                        .font(.system(size: 10, weight: .medium))
+                }
+                .foregroundColor(.red)
+                .padding(.top, 4)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 6)
-        .background(Color.orange.opacity(0.08))
+        .background(breachCount > 0 ? Color.red.opacity(0.08) : Color.orange.opacity(0.08))
+        .onAppear {
+            PasswordManager.shared.checkBreached(password: credential.password) { count in
+                breachCount = count
+                breachChecked = true
+            }
+        }
     }
 }
 

@@ -35,10 +35,17 @@ let package = Package(
                 .linkedFramework("CoreImage")
             ]
         ),
+        // SecureMem - mlock-backed memory for password protection (never swapped to disk)
+        .target(
+            name: "SecureMem",
+            dependencies: [],
+            path: "Sources/SecureMem",
+            publicHeadersPath: "include"
+        ),
         // Aplicación principal con UI SwiftUI
         .executableTarget(
             name: "MAI",
-            dependencies: ["CEFWrapper"],
+            dependencies: ["CEFWrapper", "SecureMem"],
             path: "Sources/MAI",
             swiftSettings: [
                 .unsafeFlags(["-parse-as-library"])

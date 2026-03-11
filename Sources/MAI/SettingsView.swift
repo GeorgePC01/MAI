@@ -70,14 +70,19 @@ struct GeneralSettingsView: View {
                     get: { PasswordManager.shared.isEnabled },
                     set: { PasswordManager.shared.isEnabled = $0 }
                 ))
-                Text("Ofrece guardar contraseñas al iniciar sesión en sitios web. Almacenadas en Keychain de macOS.")
+                Text("Ofrece guardar contraseñas al iniciar sesión en sitios web. Almacenadas en Keychain de macOS con autenticación biométrica.")
                     .font(.caption).foregroundColor(.secondary)
 
                 HStack {
                     Label("\(PasswordManager.shared.savedCount) contraseñas guardadas", systemImage: "key.fill")
                     Spacer()
                     Button("Ver contraseñas") {
-                        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                        // ISO 27001 A.9.4 / NIST 800-63B: Requiere Touch ID o contraseña del sistema
+                        PasswordManager.shared.authenticate(reason: "Ver contraseñas guardadas") { success in
+                            if success {
+                                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                            }
+                        }
                     }
                     .buttonStyle(.borderless)
                 }

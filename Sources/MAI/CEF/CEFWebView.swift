@@ -183,6 +183,35 @@ struct CEFWebView: NSViewRepresentable {
             }
         }
 
+        func cefBrowserDidCapturePassword(forHost host: String, username: String, password: String) {
+            guard !tab.isIncognito else { return }
+
+            // Phishing check (OWASP A07)
+            if let url = URL(string: "https://\(host)") {
+                let threat = PhishingDetector.shared.analyze(url: url)
+                switch threat {
+                case .suspicious(_, _), .dangerous(_, _):
+                    return
+                case .safe:
+                    break
+                }
+            }
+
+            // Check duplicate
+            if PasswordManager.shared.hasCredentials(for: host) {
+                let existing = PasswordManager.shared.getCredentials(for: host)
+                if existing.contains(where: { $0.username == username && $0.password == password }) {
+                    return
+                }
+            }
+
+            DispatchQueue.main.async { [weak self] in
+                self?.browserState.pendingCredential = PendingCredential(
+                    host: host, username: username, password: password
+                )
+            }
+        }
+
         func cefBrowserRendererCrashed(withStatus status: Int32) {
             DispatchQueue.main.async { [weak self] in
                 guard let self = self else { return }
