@@ -20,6 +20,10 @@ NS_ASSUME_NONNULL_BEGIN
 - (void)cefBrowserDidUpdateLoadProgress:(double)progress;
 - (void)cefBrowserDidClose;
 - (void)cefBrowserRendererCrashedWithStatus:(int)status;
+/// Password capture from CEF login forms (base64-decoded host/username/password)
+- (void)cefBrowserDidCapturePasswordForHost:(NSString *)host
+                                   username:(NSString *)username
+                                   password:(NSString *)password;
 @end
 
 /// Delegate protocol for Chrome DevTools Protocol (CDP) events

@@ -794,16 +794,51 @@ struct WebViewRepresentable: NSViewRepresentable {
         // MARK: - Password Manager
 
         private func handlePasswordCapture(_ message: WKScriptMessage) {
-            guard let body = message.body as? [String: String],
-                  let host = body["host"],
-                  let username = body["username"],
-                  let password = body["password"],
+            guard let body = message.body as? [String: Any],
+                  let hostRaw = body["host"] as? String,
+                  let usernameRaw = body["username"] as? String,
+                  let passwordRaw = body["password"] as? String,
                   !tab.isIncognito else { return }
 
+            // Decodificar base64 si viene encoded (ISO 27001 A.10.1 — transit encryption)
+            let isEncoded = body["encoded"] as? Bool ?? false
+            let host: String
+            let username: String
+            let password: String
+            if isEncoded {
+                guard let hData = Data(base64Encoded: hostRaw), let h = String(data: hData, encoding: .utf8),
+                      let uData = Data(base64Encoded: usernameRaw), let u = String(data: uData, encoding: .utf8),
+                      let pData = Data(base64Encoded: passwordRaw), let p = String(data: pData, encoding: .utf8)
+                else { return }
+                host = h; username = u; password = p
+            } else {
+                host = hostRaw; username = usernameRaw; password = passwordRaw
+            }
+
+            // B1: HTTP hard-block — no guardar credenciales de sitios sin HTTPS
+            if let webView = tab.webView, webView.url?.scheme == "http" {
+                print("🔒 Captura bloqueada: sitio HTTP inseguro")
+                return
+            }
+
+            // No ofrecer guardar credenciales de sitios sospechosos/phishing (OWASP A07)
+            if let url = URL(string: "https://\(host)") {
+                let threat = PhishingDetector.shared.analyze(url: url)
+                switch threat {
+                case .suspicious(_, _), .dangerous(_, _):
+                    print("🔒 Captura de credenciales bloqueada por PhishingDetector")
+                    return
+                case .safe:
+                    break
+                }
+            }
+
             // Verificar si ya existe esta credencial exacta
-            let existing = PasswordManager.shared.getCredentials(for: host)
-            if existing.contains(where: { $0.username == username && $0.password == password }) {
-                return // Ya guardada
+            if PasswordManager.shared.hasCredentials(for: host) {
+                let existing = PasswordManager.shared.getCredentials(for: host)
+                if existing.contains(where: { $0.username == username && $0.password == password }) {
+                    return
+                }
             }
 
             // Mostrar banner para guardar
@@ -815,17 +850,34 @@ struct WebViewRepresentable: NSViewRepresentable {
         }
 
         private func autoFillPassword(webView: WKWebView, host: String) {
-            let credentials = PasswordManager.shared.getCredentials(for: host)
-            guard let cred = credentials.first else { return }
+            guard let url = webView.url else { return }
 
-            // Primero detectar si hay formulario de login
-            webView.evaluateJavaScript(PasswordManager.detectLoginFormScript) { [weak self] result, _ in
-                guard let hasLogin = result as? Bool, hasLogin else { return }
-                let fillScript = PasswordManager.autoFillScript(username: cred.username, password: cred.password)
-                webView.evaluateJavaScript(fillScript) { _, error in
-                    if error == nil {
-                        print("🔑 Auto-fill aplicado en \(host)")
-                    }
+            // B1: HTTP hard-block — NUNCA auto-fill en sitios sin HTTPS
+            if url.scheme == "http" {
+                print("🔒 Auto-fill bloqueado: sitio HTTP inseguro")
+                return
+            }
+
+            // OWASP A07: Verificar phishing ANTES de auto-fill
+            let threat = PhishingDetector.shared.analyze(url: url)
+            switch threat {
+            case .suspicious(_, _), .dangerous(_, _):
+                print("🔒 Auto-fill bloqueado por PhishingDetector")
+                return
+            case .safe:
+                break
+            }
+
+            // ISO 27001 A.9.4: Autenticar con Touch ID antes de acceder a credenciales
+            PasswordManager.shared.getCredentialsForAutoFill(host: host) { credentials in
+                guard let cred = credentials.first else { return }
+
+                // Detectar si hay formulario de login, luego auto-fill con mlock protection
+                webView.evaluateJavaScript(PasswordManager.detectLoginFormScript) { result, _ in
+                    guard let hasLogin = result as? Bool, hasLogin else { return }
+                    // Password protegido con mlock — nunca toca swap disk
+                    let fillScript = PasswordManager.shared.secureAutoFillScript(for: cred)
+                    webView.evaluateJavaScript(fillScript) { _, _ in }
                 }
             }
         }

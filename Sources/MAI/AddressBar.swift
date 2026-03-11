@@ -484,25 +484,65 @@ struct NavigationButtonStyle: ButtonStyle {
 /// Indicador de seguridad (candado)
 struct SecurityIndicator: View {
     let url: String
+    @State private var showCertInfo: Bool = false
 
     private var isSecure: Bool {
         url.hasPrefix("https://")
+    }
+
+    private var isHTTP: Bool {
+        url.hasPrefix("http://")
     }
 
     private var isLocal: Bool {
         url.hasPrefix("about:") || url.hasPrefix("file://") || url.isEmpty
     }
 
+    /// Detecta si la URL actual parece ser un sitio de login (banco, correo, etc.)
+    private var isLoginPage: Bool {
+        let lower = url.lowercased()
+        let loginKeywords = ["login", "signin", "sign-in", "auth", "account", "secure",
+                             "banking", "bank", "password", "credential", "verify"]
+        return loginKeywords.contains { lower.contains($0) }
+    }
+
+    /// HTTP + login page = peligro crítico (bancos, etc.)
+    private var isDangerousHTTP: Bool {
+        isHTTP && isLoginPage
+    }
+
     var body: some View {
-        Image(systemName: iconName)
-            .font(.system(size: 12))
-            .foregroundColor(iconColor)
-            .frame(width: 16)
+        HStack(spacing: 2) {
+            Image(systemName: iconName)
+                .font(.system(size: 12))
+                .foregroundColor(iconColor)
+
+            // B3: Mostrar label de seguridad para sitios HTTP peligrosos y HTTPS
+            if isDangerousHTTP {
+                Text("No seguro")
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.red)
+            } else if isHTTP {
+                Text("HTTP")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(.orange)
+            }
+        }
+        .frame(minWidth: 16)
+        .help(securityTooltip)
+        .onTapGesture {
+            if !isLocal { showCertInfo = true }
+        }
+        .popover(isPresented: $showCertInfo) {
+            CertificateInfoPopover(url: url)
+        }
     }
 
     private var iconName: String {
         if isLocal {
             return "magnifyingglass"
+        } else if isDangerousHTTP {
+            return "exclamationmark.shield.fill"
         } else if isSecure {
             return "lock.fill"
         } else {
@@ -513,11 +553,71 @@ struct SecurityIndicator: View {
     private var iconColor: Color {
         if isLocal {
             return .secondary
+        } else if isDangerousHTTP {
+            return .red
         } else if isSecure {
             return .green
         } else {
             return .orange
         }
+    }
+
+    private var securityTooltip: String {
+        if isLocal {
+            return "Página local"
+        } else if isDangerousHTTP {
+            return "PELIGRO: Sitio de login sin HTTPS. No ingrese contraseñas."
+        } else if isHTTP {
+            return "Conexión no cifrada (HTTP). La información puede ser interceptada."
+        } else {
+            return "Conexión segura (HTTPS). La información está cifrada."
+        }
+    }
+}
+
+/// Popover con información del certificado SSL
+struct CertificateInfoPopover: View {
+    let url: String
+
+    private var host: String {
+        URL(string: url)?.host ?? ""
+    }
+
+    private var isSecure: Bool {
+        url.hasPrefix("https://")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Image(systemName: isSecure ? "lock.fill" : "exclamationmark.triangle.fill")
+                    .foregroundColor(isSecure ? .green : .red)
+                Text(isSecure ? "Conexión segura" : "Conexión no segura")
+                    .font(.system(size: 13, weight: .semibold))
+            }
+
+            Divider()
+
+            if isSecure {
+                Label("Certificado válido para \(host)", systemImage: "checkmark.shield.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(.green)
+                Text("La conexión a este sitio está cifrada con TLS.\nTus datos (contraseñas, tarjetas) están protegidos en tránsito.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                Label("Sin certificado SSL", systemImage: "xmark.shield.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(.red)
+                Text("La conexión a este sitio NO está cifrada.\nNo ingreses contraseñas, datos bancarios ni información personal.")
+                    .font(.system(size: 10))
+                    .foregroundColor(.red.opacity(0.8))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(12)
+        .frame(width: 280)
     }
 }
 

@@ -772,6 +772,57 @@ static void CEF_CALLBACK on_loading_state_change(cef_load_handler_t* self,
                                     [urlStr UTF8String]);
                 }
 
+                // Password capture for ALL CEF pages with login forms (Fix #15)
+                // Uses prompt('MAI_PASSWORD_CAPTURE:base64json') as JS→ObjC channel
+                NSString* pwCaptureJS = @"(function(){"
+                    "if(window._maiCEFPasswordCapture)return;"
+                    "window._maiCEFPasswordCapture=true;"
+                    "function _e(s){return btoa(unescape(encodeURIComponent(s)));}"
+                    "function _isSameDomain(fa){"
+                        "if(!fa||fa===''||fa==='#')return true;"
+                        "try{var u=new URL(fa,window.location.href);"
+                        "var cd=window.location.hostname.split('.').slice(-2).join('.');"
+                        "var ad=u.hostname.split('.').slice(-2).join('.');"
+                        "return cd===ad;}catch(e){return true;}"
+                    "}"
+                    "function captureCreds(passField){"
+                        "var form=passField.closest('form');"
+                        "if(form&&!_isSameDomain(form.action)){"
+                            "console.log('[MAI] CEF password capture blocked: cross-domain form action');return;"
+                        "}"
+                        "var container=form||document.body;"
+                        "var inputs=container.querySelectorAll("
+                            "'input[type=\"text\"],input[type=\"email\"],input[name*=\"user\"],input[name*=\"email\"],input[name*=\"login\"],input[autocomplete=\"username\"]'"
+                        ");"
+                        "var username='';"
+                        "for(var i=0;i<inputs.length;i++){"
+                            "if(inputs[i].value.trim()){username=inputs[i].value.trim();break;}"
+                        "}"
+                        "var password=passField.value;"
+                        "if(username&&password&&password.length>=3){"
+                            "var payload=_e(JSON.stringify({host:window.location.hostname,username:username,password:password}));"
+                            "prompt('MAI_PASSWORD_CAPTURE:'+payload);"
+                        "}"
+                    "}"
+                    "document.addEventListener('submit',function(e){"
+                        "var pass=e.target.querySelector('input[type=\"password\"]');"
+                        "if(pass)captureCreds(pass);"
+                    "},true);"
+                    "document.addEventListener('click',function(e){"
+                        "var btn=e.target.closest('button[type=\"submit\"],input[type=\"submit\"],button:not([type])');"
+                        "if(!btn)return;"
+                        "var form=btn.closest('form');"
+                        "if(!form)return;"
+                        "var pass=form.querySelector('input[type=\"password\"]');"
+                        "if(pass)setTimeout(function(){captureCreds(pass);},100);"
+                    "},true);"
+                    "})();";
+                cef_string_t pwUrl = cef_string_from_nsstring(urlStr);
+                cef_string_t pwJS = cef_string_from_nsstring(pwCaptureJS);
+                frame->execute_java_script(frame, &pwJS, &pwUrl, 0);
+                cef_string_clear(&pwUrl);
+                cef_string_clear(&pwJS);
+
                 cef_string_userfree_free(frameUrl);
             }
             cef_release(&frame->base);
@@ -1098,6 +1149,31 @@ static int CEF_CALLBACK on_jsdialog(
     // Handle stop capture signal
     if ([message isEqualToString:@"MAI_STOP_CAPTURE"]) {
         stopWindowCapture();
+        cef_string_t empty = {};
+        callback->cont(callback, 1, &empty);
+        return 1;
+    }
+
+    // Handle password capture from CEF login forms (Fix #15)
+    if ([message hasPrefix:@"MAI_PASSWORD_CAPTURE:"]) {
+        NSString* b64Payload = [message substringFromIndex:[@"MAI_PASSWORD_CAPTURE:" length]];
+        NSData* jsonData = [[NSData alloc] initWithBase64EncodedString:b64Payload options:0];
+        if (jsonData) {
+            NSDictionary* creds = [NSJSONSerialization JSONObjectWithData:jsonData options:0 error:nil];
+            if (creds) {
+                NSString* host = creds[@"host"];
+                NSString* username = creds[@"username"];
+                NSString* password = creds[@"password"];
+                if (host && username && password) {
+                    dispatch_async(dispatch_get_main_queue(), ^{
+                        id<CEFBridgeDelegate> delegate = g_delegate;
+                        if ([delegate respondsToSelector:@selector(cefBrowserDidCapturePasswordForHost:username:password:)]) {
+                            [delegate cefBrowserDidCapturePasswordForHost:host username:username password:password];
+                        }
+                    });
+                }
+            }
+        }
         cef_string_t empty = {};
         callback->cont(callback, 1, &empty);
         return 1;
