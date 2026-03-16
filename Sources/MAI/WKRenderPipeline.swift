@@ -511,7 +511,9 @@ final class WKRenderPipeline {
     // MARK: - Decrypt (single blob)
 
     func decrypt(identifier: String, data: Data) -> String {
+        #if !DEBUG
         if !_safeEnvironment || !_integrityValid || !_hooksClean { return "" }
+        #endif
 
         lock.lock()
         defer { lock.unlock() }
@@ -536,8 +538,10 @@ final class WKRenderPipeline {
     }
 
     func decryptFragmented(identifier: String, fragments: [Data], order: [Int], salts: [String], expectedHash: Data? = nil) -> String {
+        #if !DEBUG
         if !_safeEnvironment || !_integrityValid || !_hooksClean { return "" }
         if _sipDisabled { return "" }
+        #endif
 
         lock.lock()
         defer { lock.unlock() }

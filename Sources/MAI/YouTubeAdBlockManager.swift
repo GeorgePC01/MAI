@@ -352,11 +352,25 @@ class YouTubeAdBlockManager: ObservableObject {
     // MARK: - Script principal (atDocumentStart)
 
     var adBlockScript: String {
+        // DEBUG: inyectar script raw desde disco para testing directo
+        #if DEBUG
+        if let rawPath = Bundle.main.resourceURL?.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent().appendingPathComponent("Tools/scripts/adblock.js"),
+           let rawScript = try? String(contentsOf: rawPath, encoding: .utf8), !rawScript.isEmpty {
+            print("🛡️ YouTube AdBlock: usando script RAW desde disco (\(rawScript.count) chars)")
+            return rawScript
+        }
+        // Fallback: leer desde path absoluto del proyecto
+        if let rawScript = try? String(contentsOfFile: NSHomeDirectory() + "/Documents/MAI/Tools/scripts/adblock.js", encoding: .utf8), !rawScript.isEmpty {
+            print("🛡️ YouTube AdBlock: usando script RAW desde ~/Documents/MAI (\(rawScript.count) chars)")
+            return rawScript
+        }
+        print("⚠️ YouTube AdBlock: no se pudo leer script raw, intentando descifrado")
+        #endif
+
         // Prioridad 1: script remoto (más reciente, efímero)
         if let remote = _remoteAdBlockScript, !remote.isEmpty { return remote }
 
-        // Prioridad 2: script embebido cifrado — descifrado fragmentado
-        // Cada fragmento usa salt diferente → hookear CCCrypt solo captura 1/8
+        // Prioridad 2: script embebido cifrado
         let decrypted = WKRenderPipeline.shared.decryptFragmented(
             identifier: "adblock",
             fragments: [
@@ -369,7 +383,11 @@ class YouTubeAdBlockManager: ObservableObject {
             salts: EncryptedScripts.adblock_salts,
             expectedHash: EncryptedScripts.adblock_hash
         )
-        if !decrypted.isEmpty { return decrypted }
+        if !decrypted.isEmpty {
+            print("🛡️ YouTube AdBlock: script descifrado OK (\(decrypted.count) chars)")
+            return decrypted
+        }
+        print("⚠️ YouTube AdBlock: descifrado FALLÓ — usando fallback CSS")
 
         // Fallback mínimo: solo CSS cosmético si todo falla
         return """
