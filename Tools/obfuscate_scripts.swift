@@ -153,8 +153,30 @@ func obfuscateStrings(_ js: String) -> String {
 
     for pattern in sensitivePatterns {
         let idx = registerString(pattern)
+        // Replace quoted strings: 'adPlacements' and "adPlacements" → _$(idx)
         result = result.replacingOccurrences(of: "'\(pattern)'", with: "_$(\(idx))")
         result = result.replacingOccurrences(of: "\"\(pattern)\"", with: "_$(\(idx))")
+    }
+
+    // Convert dot-access property names to bracket notation: .adPlacements → [_$(idx)]
+    // This eliminates the last readable ad-related patterns in the obfuscated JS
+    let propertyPatterns = [
+        "adPlacements", "playerAds", "adSlots", "adBreakParams",
+        "adBreakHeartbeatParams", "instreamAdBreak", "linearAdSequenceRenderer",
+        "adPlacementRenderer", "actionCompanionAdRenderer", "adVideoId",
+        "instreamAdPlayerOverlayRenderer", "adLayoutLoggingData",
+        "instreamAdContentRenderer", "prerollAdRenderer",
+        "adPlaybackTracking", "adInfoRenderer", "adNextParams",
+        "adModule", "adThrottled", "playerAdParams", "adRequestConfig",
+        "adSignalsInfo", "adConfig", "adsConfig",
+        "playerResponse", "streamingData",
+        "enforcementMessageViewModel", "bkaEnforcementMessageViewModel",
+        "ytInitialPlayerResponse", "ytInitialData", "ytPlayerConfig",
+    ]
+    for prop in propertyPatterns {
+        if let idx = stLookup[prop] {
+            result = result.replacingOccurrences(of: ".\(prop)", with: "[_$(\(idx))]")
+        }
     }
 
     return result

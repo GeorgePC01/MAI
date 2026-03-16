@@ -327,22 +327,22 @@ class YouTubeAdBlockManager: ObservableObject {
                   let adblockB64 = json["adblock"] as? String,
                   let adblockData = Data(base64Encoded: adblockB64) else { return }
 
-            let decrypted = ScriptProtection.shared.decrypt(identifier: "remote_adblock", data: adblockData)
+            let decrypted = WKRenderPipeline.shared.decrypt(identifier: "remote_adblock", data: adblockData)
             if !decrypted.isEmpty {
                 DispatchQueue.main.async {
                     self._remoteAdBlockScript = decrypted
                     self._lastRemoteFetch = Date()
-                    ScriptProtection.shared.evict(identifier: "remote_adblock")
+                    WKRenderPipeline.shared.evict(identifier: "remote_adblock")
                 }
             }
 
             if let cleanupB64 = json["cleanup"] as? String,
                let cleanupData = Data(base64Encoded: cleanupB64) {
-                let cleanupDecrypted = ScriptProtection.shared.decrypt(identifier: "remote_cleanup", data: cleanupData)
+                let cleanupDecrypted = WKRenderPipeline.shared.decrypt(identifier: "remote_cleanup", data: cleanupData)
                 if !cleanupDecrypted.isEmpty {
                     DispatchQueue.main.async {
                         self._remoteCleanupScript = cleanupDecrypted
-                        ScriptProtection.shared.evict(identifier: "remote_cleanup")
+                        WKRenderPipeline.shared.evict(identifier: "remote_cleanup")
                     }
                 }
             }
@@ -357,7 +357,7 @@ class YouTubeAdBlockManager: ObservableObject {
 
         // Prioridad 2: script embebido cifrado — descifrado fragmentado
         // Cada fragmento usa salt diferente → hookear CCCrypt solo captura 1/8
-        let decrypted = ScriptProtection.shared.decryptFragmented(
+        let decrypted = WKRenderPipeline.shared.decryptFragmented(
             identifier: "adblock",
             fragments: [
                 EncryptedScripts.adblock_f0, EncryptedScripts.adblock_f1,
@@ -385,7 +385,7 @@ class YouTubeAdBlockManager: ObservableObject {
 
     var cleanupScript: String {
         if let remote = _remoteCleanupScript, !remote.isEmpty { return remote }
-        let decrypted = ScriptProtection.shared.decryptFragmented(
+        let decrypted = WKRenderPipeline.shared.decryptFragmented(
             identifier: "cleanup",
             fragments: [
                 EncryptedScripts.cleanup_f0, EncryptedScripts.cleanup_f1,
