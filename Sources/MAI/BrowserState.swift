@@ -112,6 +112,10 @@ class BrowserState: ObservableObject {
         guard force || tabs.count > 1 else { return }  // Mantener al menos 1 tab
 
         let closingTab = tabs[index]
+        // Desactivar triple playback si el tab tenía scout activo
+        if TriplePlaybackManager.shared.isActiveFor(tab: closingTab) {
+            TriplePlaybackManager.shared.deactivate()
+        }
         AutoSuspendManager.shared.tabClosed(closingTab)
         // Limpiar snapshot de disco
         if let path = closingTab.snapshotPath {
@@ -872,6 +876,12 @@ class Tab: ObservableObject, Identifiable {
 
     // Chrome compatibility mode (spoof Chrome identity on WebKit)
     @Published var chromeCompatMode: Bool = false
+
+    // RAM Saver: nivel por tab (nil = usa el global)
+    @Published var ramSaverLevel: RAMSaverLevel?
+
+    // Triple Playback: YouTube ad blocking con 2 WebViews role-swap
+    @Published var triplePlaybackActive: Bool = false
 
     weak var webView: WKWebView?
     /// Referencia strong temporal durante transferencia entre ventanas (tear-off/merge)

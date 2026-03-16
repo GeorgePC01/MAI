@@ -260,7 +260,9 @@ class WebViewConfigurationManager {
             }
         }
 
-        // YouTube ad blocking: JS injection + network rules
+        // YouTube ad blocking: JS pasivo (mute + overlay + click skip)
+        // YouTube 2026 detecta: playbackRate, currentTime, classList.remove, network blocking
+        // Enfoque v3: NO tocar video element ni player state, solo mute + overlay + skip button
         if YouTubeAdBlockManager.shared.blockYouTubeAds {
             let ytAdBlockScript = WKUserScript(
                 source: YouTubeAdBlockManager.shared.adBlockScript,
@@ -269,17 +271,18 @@ class WebViewConfigurationManager {
             )
             config.userContentController.addUserScript(ytAdBlockScript)
 
-            // Script de limpieza post-carga (atDocumentEnd)
-            let ytCleanupScript = WKUserScript(
-                source: YouTubeAdBlockManager.shared.cleanupScript,
-                injectionTime: .atDocumentEnd,
-                forMainFrameOnly: true
-            )
-            config.userContentController.addUserScript(ytCleanupScript)
+            // Script ya inyectado en WKUserScript — limpiar de memoria
+            ScriptProtection.shared.evict(identifier: "adblock")
+            ScriptProtection.shared.evict(identifier: "cleanup")
 
-            if let ytRuleList = YouTubeAdBlockManager.shared.compiledRuleList {
-                config.userContentController.add(ytRuleList)
-            }
+            // WKContentRuleList desactivadas — YouTube 2026 requiere tracking URLs
+            // para servir video. Bloquearlas causa error 282054944.
+        }
+
+        // RAM Saver: aplicar configuración según nivel global
+        let ramLevel = RAMSaverManager.shared.globalLevel
+        if ramLevel != .off {
+            RAMSaverManager.shared.configure(config, level: ramLevel)
         }
 
         return config
@@ -411,6 +414,9 @@ struct WebViewRepresentable: NSViewRepresentable {
             config.userContentController.add(context.coordinator, name: "passwordCapture")
         }
 
+        // Register Triple Playback message handler (YouTube ad blocking role-swap)
+        config.userContentController.add(context.coordinator, name: "maiTriplePlaybackSwap")
+
         // Register DevTools message handlers (console log + network interception)
         config.userContentController.add(context.coordinator, name: "maiDevToolsConsole")
         config.userContentController.add(context.coordinator, name: "maiDevToolsNetwork")
@@ -497,6 +503,8 @@ struct WebViewRepresentable: NSViewRepresentable {
                 CookieBannerManager.shared.bannersBlocked += 1
             } else if message.name == "passwordCapture" {
                 handlePasswordCapture(message)
+            } else if message.name == "maiTriplePlaybackSwap" {
+                handleTriplePlaybackMessage(message)
             } else if message.name == "maiDevToolsConsole" {
                 handleDevToolsConsole(message)
             } else if message.name == "maiDevToolsNetwork" {
@@ -524,6 +532,44 @@ struct WebViewRepresentable: NSViewRepresentable {
                 message: msg, source: source, line: nil
             )
             DevToolsState.shared.addLog(entry)
+        }
+
+        private func handleTriplePlaybackMessage(_ message: WKScriptMessage) {
+            guard let body = message.body as? [String: Any],
+                  let action = body["action"] as? String else { return }
+
+            let tripleManager = TriplePlaybackManager.shared
+
+            switch action {
+            case "adDetected":
+                // Main WebView detectó un ad
+                if tripleManager.isActiveFor(tab: tab) {
+                    // Scout ya está corriendo — solicitar swap
+                    tripleManager.onMainAdDetected()
+                } else if let webView = tab.webView,
+                          let url = webView.url,
+                          tripleManager.shouldActivate(for: url) {
+                    // Primer ad detectado — activar Scout ahora
+                    // El Scout cargará la misma URL y absorberá el ad
+                    let dataStore = webView.configuration.websiteDataStore
+                    tripleManager.activate(
+                        for: tab,
+                        videoURL: url,
+                        mainWebView: webView,
+                        dataStore: dataStore
+                    )
+                    tab.triplePlaybackActive = true
+                    print("🎬 TriplePlayback: activado por detección de ad en Main")
+                }
+            case "spaNavigation":
+                // SPA navigation en Main — notificar al scout
+                if let urlString = body["url"] as? String,
+                   let url = URL(string: urlString) {
+                    tripleManager.handleSPANavigation(newURL: url)
+                }
+            default:
+                break
+            }
         }
 
         private func handleDevToolsNetwork(_ message: WKScriptMessage) {
@@ -661,11 +707,8 @@ struct WebViewRepresentable: NSViewRepresentable {
                 browserState.applyMuteState(tab)
             }
 
-            // YouTube: re-inyectar script de limpieza después de cada navegación
-            if YouTubeAdBlockManager.shared.blockYouTubeAds,
-               let host = webView.url?.host, host.contains("youtube.com") {
-                webView.evaluateJavaScript(YouTubeAdBlockManager.shared.cleanupScript) { _, _ in }
-            }
+            // YouTube: cleanup script desactivado — el enfoque pasivo v3
+            // no necesita re-inyección post-carga (no modifica JSON/fetch/player state)
 
             // Delay operaciones pesadas de JS para no competir con video rendering
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in
@@ -688,6 +731,13 @@ struct WebViewRepresentable: NSViewRepresentable {
                    let url = webView.url?.absoluteString, url != "about:blank" {
                     webView.evaluateJavaScript(TranslationManager.detectLanguageScript) { result, _ in
                         guard let sampleText = result as? String, !sampleText.isEmpty else { return }
+                        // Si es detección por html lang (LANG:xx), siempre confiable
+                        // Si es texto para API, requerir mínimo 50 chars para evitar falsos positivos en login pages
+                        let isHtmlLang = sampleText.hasPrefix("LANG:")
+                        if !isHtmlLang {
+                            let trimmed = sampleText.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard trimmed.count >= 50 else { return }
+                        }
                         Task {
                             if let detected = await translation.detectLanguage(sampleText: sampleText) {
                                 await MainActor.run {
@@ -784,6 +834,35 @@ struct WebViewRepresentable: NSViewRepresentable {
                 PrivacyManager.shared.recordBlockedRequest(url: url, type: .tracker)
                 print("🛡️ Bloqueado: \(url.host ?? url.absoluteString)")
                 decisionHandler(.cancel)
+                return
+            }
+
+            // YouTube Shadow Playback: interceptar navegación a videos de YouTube
+            // SOLO cuando el usuario viene de FUERA de YouTube (no dentro de YouTube SPA)
+            let ytManager = YouTubeAdBlockManager.shared
+            let currentHost = webView.url?.host ?? ""
+            let isAlreadyOnYouTube = currentHost.contains("youtube.com")
+            if ytManager.blockYouTubeAds && ytManager.isYouTubeVideo(url) &&
+               navigationAction.navigationType == .linkActivated && !isAlreadyOnYouTube {
+                decisionHandler(.cancel)
+                print("🎭 YouTube Shadow: interceptando desde fuera de YouTube → \(url.absoluteString)")
+
+                // Mostrar loading en el tab
+                DispatchQueue.main.async { [weak self] in
+                    guard let self = self else { return }
+                    self.tab.isLoading = true
+                    self.browserState.isLoading = true
+                }
+
+                // Iniciar shadow playback
+                let dataStore = webView.configuration.websiteDataStore
+                ytManager.startShadowPlayback(url: url, dataStore: dataStore) { [weak self] cleanURL in
+                    guard let self = self else { return }
+                    DispatchQueue.main.async {
+                        print("🎭 YouTube Shadow: cargando video limpio en principal")
+                        webView.load(URLRequest(url: cleanURL))
+                    }
+                }
                 return
             }
 

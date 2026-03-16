@@ -8,11 +8,6 @@ struct BrowserView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Selector de workspace (solo si hay más de 1)
-            if !browserState.isIncognito {
-                WorkspaceBar()
-            }
-
             // Barra de título con tabs
             TabBar()
 
@@ -1115,6 +1110,9 @@ struct WorkspaceBar: View {
                 }
             )
         }
+        .onReceive(NotificationCenter.default.publisher(for: .maiCreateWorkspace)) { _ in
+            showCreateSheet = true
+        }
     }
 
     private func renameWorkspace(_ workspace: Workspace) {
@@ -1248,7 +1246,38 @@ struct TranslationBanner: View {
     @EnvironmentObject var browserState: BrowserState
 
     var body: some View {
-        if translation.showTranslationBanner && !translation.detectedLanguage.isEmpty {
+        if translation.currentTabTranslated {
+            // Banner post-traducción: "Traducida de X" + botón "Ver original"
+            HStack(spacing: 10) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+                    .font(.system(size: 12))
+
+                Text("Traducida de \(TranslationManager.languageName(for: translation.detectedLanguage))")
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+
+                Spacer()
+
+                Button(action: { restoreOriginalPage() }) {
+                    Text("Ver original")
+                        .font(.system(size: 11, weight: .semibold))
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.mini)
+
+                Button(action: { translation.currentTabTranslated = false }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10))
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 5)
+            .background(Color.green.opacity(0.06))
+            .transition(.move(edge: .top).combined(with: .opacity))
+        } else if translation.showTranslationBanner && !translation.detectedLanguage.isEmpty {
             HStack(spacing: 10) {
                 Image(systemName: "globe")
                     .foregroundColor(.blue)
@@ -1304,6 +1333,15 @@ struct TranslationBanner: View {
             Task {
                 await translation.translatePage(webView: webView, from: sourceLang)
             }
+        }
+    }
+
+    private func restoreOriginalPage() {
+        guard let window = NSApp.keyWindow,
+              let contentView = window.contentView,
+              let webView = findWebView(in: contentView) else { return }
+        Task {
+            await translation.restoreOriginal(webView: webView)
         }
     }
 

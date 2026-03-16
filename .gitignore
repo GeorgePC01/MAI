@@ -32,6 +32,9 @@ Thumbs.db
 
 # Logs
 *.log
+log
+log[0-9]*
+googlelog
 logs/
 
 # Cache
@@ -50,6 +53,9 @@ temp/
 *.swo
 *~
 
+# Claude Code (local development context, not for production)
+.claude/
+
 # Dependencies
 Packages/
 Package.resolved
@@ -63,11 +69,20 @@ Package.resolved
 *.mlmodel
 *.mlpackage
 
-# CEF Framework (292 MB, download separately)
+# CEF Framework (311 MB with H.264, download separately)
 Frameworks/Chromium Embedded Framework.framework/
 Frameworks/CEF/
 Frameworks/libcef_dll/
 
+# CEF build distributions (539 MB, built on Mac Mini)
+cef-build-h264/
+
 # User data (testing)
 UserData/
 Profiles/
+
+# Orphan directories (accidental nesting)
+Documents/
+
+# Claude Code context files in docs (auto-generated, not project docs)
+docs/CLAUDE.md
