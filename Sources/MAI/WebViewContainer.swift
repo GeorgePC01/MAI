@@ -707,8 +707,19 @@ struct WebViewRepresentable: NSViewRepresentable {
                 browserState.applyMuteState(tab)
             }
 
-            // YouTube: cleanup script desactivado — el enfoque pasivo v3
-            // no necesita re-inyección post-carga (no modifica JSON/fetch/player state)
+            // YouTube: re-inyectar ad blocker en cada navegación
+            // WKUserScript solo se ejecuta en la carga inicial de la página.
+            // SPA navigation (click entre videos) no re-ejecuta WKUserScript,
+            // así que re-inyectamos vía evaluateJavaScript en cada didFinish.
+            if YouTubeAdBlockManager.shared.blockYouTubeAds,
+               let host = webView.url?.host, host.contains("youtube.com") {
+                let script = YouTubeAdBlockManager.shared.adBlockScript
+                webView.evaluateJavaScript(script) { _, error in
+                    if let error = error {
+                        print("⚠️ YouTube AdBlock re-inject error: \(error.localizedDescription)")
+                    }
+                }
+            }
 
             // Delay operaciones pesadas de JS para no competir con video rendering
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { [weak self] in

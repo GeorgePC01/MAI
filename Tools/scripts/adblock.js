@@ -3,8 +3,10 @@
             if (!location.hostname.includes('youtube.com')) return;
             if (window._maiYTAdBlock) return;
             window._maiYTAdBlock = true;
+            console.log('[MAI AdBlock] Script inyectado correctamente en ' + location.href);
 
             var _n = function(t) {
+                console.log('[MAI AdBlock] ' + t);
                 try { window.webkit.messageHandlers.youtubeAdBlocked.postMessage(t); } catch(e) {}
             };
 
@@ -515,8 +517,6 @@
             // Loop principal
             // ============================================================
             function handleAds() {
-                // Solo manejar video ads en páginas /watch
-                // En homepage/search, el CSS y MutationObserver manejan feed ads
                 if (location.pathname.indexOf('/watch') !== 0) return;
 
                 closePopups();
@@ -524,12 +524,18 @@
                 var player = document.querySelector('.html5-video-player');
                 if (!player) return;
 
-                var isAd = player.classList.contains('ad-showing')
-                    || player.classList.contains('ad-interrupting');
+                // Detección dual: class ad-showing + .ytp-ad-module con hijos
+                var adModule = document.querySelector('.ytp-ad-module');
+                var adModuleHasChildren = adModule && adModule.children.length > 0;
+                var hasAdShowing = player.classList.contains('ad-showing');
+                var hasAdInterrupting = player.classList.contains('ad-interrupting');
+                var isAd = hasAdShowing || hasAdInterrupting || adModuleHasChildren;
+                if (isAd && !_wasAd) {
+                    console.log('[MAI AdBlock] AD DETECTADO — ad-showing:' + hasAdShowing + ' ad-interrupting:' + hasAdInterrupting + ' adModule:' + adModuleHasChildren);
+                }
 
                 if (!isAd) {
                     if (_wasAd) {
-                        // Ad terminó — restaurar audio y velocidad
                         _wasAd = false;
                         _adStartTime = 0;
                         hideAdOverlay();
@@ -540,12 +546,9 @@
                             v.playbackRate = 1;
                             if (v.paused) try { v.play(); } catch(e) {}
                         }
-                        startPolling(false); // Polling normal 200ms
+                        startPolling(false);
                         _n('ad_ended');
                     }
-                    // Después de que el contenido empiece a reproducirse,
-                    // inyectar capas agresivas para PREVENIR mid-roll ads
-                    // SOLO en páginas de video (/watch), NO en homepage/search/etc.
                     if (!_contentPlayed && location.pathname.indexOf('/watch') === 0) {
                         var cv = document.querySelector('video');
                         if (cv && cv.currentTime > 2 && !cv.paused) {
@@ -557,38 +560,86 @@
                     return;
                 }
 
-                // === AD DETECTADO (pre-roll o mid-roll que escapó) ===
+                // === AD DETECTADO — CADA CICLO (50ms) ===
+                // Todo en try/catch individual — YouTube 2026 protege propiedades del video
                 var video = document.querySelector('video');
 
                 if (!_wasAd) {
                     _adStartTime = Date.now();
-                    if (video) _savedVolume = video.volume || 1;
-                    startPolling(true); // Polling rápido 50ms durante ad
+                    try { if (video) _savedVolume = video.volume || 1; } catch(e) {}
+                    startPolling(true);
                     _n('ad_detected');
                 }
                 _wasAd = true;
 
-                // Acción 1: Mute (seguro — YouTube NO detecta)
+                // 1. Mute
+                try { if (video) { video.muted = true; video.volume = 0; } } catch(e) {}
+
+                // 2. Overlay
+                try { showAdOverlay(); } catch(e) {}
+
+                // 3. Click skip button (PRIORIDAD — funciona siempre)
+                try { clickSkipButton(); } catch(e) {}
+
+                // 4. Acelerar: YouTube 2026 puede proteger playbackRate con defineProperty
+                // Intentamos con el setter nativo del HTMLMediaElement
                 if (video) {
-                    video.muted = true;
-                    video.volume = 0;
+                    try {
+                        var vProto = HTMLMediaElement.prototype;
+                        var rateDesc = Object.getOwnPropertyDescriptor(vProto, 'playbackRate');
+                        if (rateDesc && rateDesc.set) {
+                            rateDesc.set.call(video, 16);
+                        } else {
+                            video.playbackRate = 16;
+                        }
+                    } catch(e) {
+                        try { video.playbackRate = 16; } catch(e2) {
+                            try { video.playbackRate = 8; } catch(e3) {}
+                        }
+                    }
+
+                    // 5. Saltar al final via setter nativo
+                    try {
+                        if (video.duration && isFinite(video.duration) && video.duration > 0.5) {
+                            var ctDesc = Object.getOwnPropertyDescriptor(vProto, 'currentTime');
+                            if (ctDesc && ctDesc.set) {
+                                ctDesc.set.call(video, video.duration - 0.1);
+                            } else {
+                                video.currentTime = video.duration - 0.1;
+                            }
+                        }
+                    } catch(e) {
+                        try { video.currentTime = video.duration - 0.1; } catch(e2) {}
+                    }
                 }
 
-                // Acción 2: Overlay visual
-                showAdOverlay();
-
-                // Acción 3: Click skip button (seguro — simula humano)
-                clickSkipButton();
-
-                // Acción 4: Acelerar ad
-                if (video) {
-                    try { video.playbackRate = 16; } catch(e) {
-                        try { video.playbackRate = 8; } catch(e2) {}
+                // 6. Player API skip
+                try {
+                    var mp = document.getElementById('movie_player');
+                    if (mp) {
+                        if (typeof mp.skipAd === 'function') mp.skipAd();
+                        if (typeof mp.finishAd === 'function') mp.finishAd();
+                        if (typeof mp.cancelPlayback === 'function') mp.cancelPlayback();
                     }
-                    if (video.duration && isFinite(video.duration) && video.duration > 0) {
-                        video.currentTime = video.duration - 0.1;
+                } catch(e) {}
+
+                // 7. Escalación a 3s: reload video real
+                try {
+                    if (_adStartTime > 0) {
+                        var elapsed = (Date.now() - _adStartTime) / 1000;
+                        if (elapsed > 3) {
+                            var mp2 = document.getElementById('movie_player');
+                            var vidMatch = location.href.match(/[?&]v=([^&]+)/);
+                            if (mp2 && vidMatch) {
+                                if (typeof mp2.loadVideoById === 'function') {
+                                    mp2.loadVideoById(vidMatch[1]);
+                                    _adStartTime = 0;
+                                    _n('ad_force_reload');
+                                }
+                            }
+                        }
                     }
-                }
+                } catch(e) {}
             }
 
             // ============================================================
