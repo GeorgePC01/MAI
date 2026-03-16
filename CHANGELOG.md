@@ -86,6 +86,43 @@ Brave usa BAT (crypto tokens): volátil, confuso, difícil de convertir, requier
 
 ---
 
+## v0.9.7.2 (2026-03-16 02:30 CST) — Ad Blocker Fixes + Anti-Kong + macOS 26 Codesign
+
+### Anti-Kong Hardening (Capa 10)
+- **Clase renombrada**: `ScriptProtection` → `WKRenderPipeline` (archivo + clase). Kong ve nombre genérico de WebKit.
+- **JS property obfuscation**: `result.adPlacements` → `result[_$(idx)]` bracket notation via string table.
+- **String table**: 88 strings codificados con XOR rolling per-entry, tabla shuffled + 4-8 dummy entries. Reemplaza `String.fromCharCode`.
+- **Decoder**: `fromCharCode` accedido via hex escapes (`\x66\x72\x6f\x6d`) — no pattern-matchable.
+- **Opaque predicates**: `if((Date.now()|1)>0)` anidados envuelven código real. Dead code con DOM queries realistas.
+- **Decoy functions**: `_computeC5()`, `_computeC6()`, `_deriveAuxKey()`, `_decryptAuxPayload()` — firmas idénticas a funciones reales.
+- **Decoy state**: `_auxVerified`, `_rotationEpoch`, `_auxCache` — actualizados por watchdog, no afectan lógica real.
+- **Key noise**: `_computeC1-C4` usan `a + noise + b - noise` (resultado idéntico, confunde data-flow analysis).
+- **UUID salts**: Salts de cifrado ahora son UUID aleatorios en vez de patrón predecible.
+- **Comentarios eliminados**: 0 metadata textual en `WKRenderPipeline.swift`.
+- **Resultado binario**: `ScriptProtection`=0, `adPlacements`=0, `fromCharCode`=0 en `strings MAI`.
+
+### Ad Blocker v3.1 Fixes
+- **DEBUG bypass**: `#if !DEBUG` en verificaciones anti-RE — descifrado funciona en desarrollo sin firma válida.
+- **Raw script en DEBUG**: Lee `adblock.js` directo desde disco, sin cifrado/ofuscación, para testing confiable.
+- **SPA re-injection**: `evaluateJavaScript` en `didFinish` para URLs de YouTube — cubre navegación SPA entre videos.
+- **Persistente cada 50ms**: Mute + skip + acelerar + `currentTime=duration` re-aplicados en cada ciclo de polling. YouTube 2026 resetea `playbackRate` entre frames.
+- **HTMLMediaElement.prototype bypass**: Accede setters nativos del prototipo para evitar `Object.defineProperty` de YouTube en la instancia.
+- **Player API agresivo**: `skipAd()` + `finishAd()` + `cancelPlayback()` cada ciclo.
+- **Escalación 3s**: `loadVideoById()` recarga video real si ad persiste más de 3 segundos.
+- **Detección dual**: `.ad-showing` class + `.ytp-ad-module` con hijos (más confiable).
+
+### macOS 26 Codesign Fix
+- **`com.apple.provenance`**: macOS 26 agrega xattr protegido en `~/Documents/` que impide `codesign`.
+- **Solución**: Build y firma en `/tmp/_mai_sign/`, luego `ditto --norsrc` al proyecto.
+- **Inside-out signing**: helpers → CEF framework → main executable → bundle.
+- **Stray files**: Elimina `.md`, `.DS_Store`, `._*` del bundle antes de firmar.
+- **Verificación**: `codesign --verify --deep --strict` integrado en `make app`.
+
+### Pendiente
+- **Ofuscador JS**: La cadena ofuscación → cifrado produce script con errores runtime en YouTube. El script raw funciona. Necesita investigación del bracket notation y string table en contexto WebKit.
+
+---
+
 ## v0.9.7-wip (2026-03-12 01:00 CST) — YouTube Ad Blocker v3: Triple Playback + Shadow WebView + 3 Niveles
 
 ### Triple Playback — YouTube Ad Blocking sin Interrupción (2026-03-12 01:00 CST)
