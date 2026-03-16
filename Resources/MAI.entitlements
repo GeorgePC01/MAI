@@ -31,5 +31,16 @@
     <!-- USB (para llaves de seguridad físicas como YubiKey) -->
     <key>com.apple.security.device.usb</key>
     <true/>
+
+    <!-- Hardened Runtime: NO incluir estas excepciones (anti-RE):
+         - com.apple.security.cs.allow-dyld-environment-variables  (bloquea DYLD_INSERT_LIBRARIES)
+         - com.apple.security.cs.disable-library-validation        (bloquea dylib injection no firmadas)
+         - com.apple.security.cs.allow-unsigned-executable-memory   (bloquea JIT no autorizado)
+         - com.apple.security.get-task-allow                        (bloquea task_for_pid debugging)
+    -->
+
+    <!-- Permitir JIT solo para WebKit/CEF (requerido para JavaScript engine) -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
 </dict>
 </plist>

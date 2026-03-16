@@ -2,6 +2,10 @@ import SwiftUI
 import CEFWrapper
 import ObjectiveC
 
+extension Notification.Name {
+    static let maiCreateWorkspace = Notification.Name("maiCreateWorkspace")
+}
+
 // MARK: - CEF + macOS 26 Compatibility Fix
 //
 // ROOT CAUSE: CEF 145 (Chromium) internally calls -[NSApplication isHandlingSendEvent]
@@ -312,6 +316,41 @@ struct MAIApp: App {
                     browserState.goHome()
                 }
                 .keyboardShortcut("h", modifiers: [.command, .shift])
+
+                Divider()
+
+                // Ahorro de RAM — menú global
+                Menu("Ahorro de RAM") {
+                    ForEach(RAMSaverLevel.allCases, id: \.self) { level in
+                        Button(action: {
+                            RAMSaverManager.shared.globalLevel = level
+                            // Aplicar a todas las tabs abiertas que no tengan nivel propio
+                            for tab in browserState.tabs {
+                                if tab.ramSaverLevel == nil, let webView = tab.webView {
+                                    if level == .off {
+                                        RAMSaverManager.shared.removeRuleLists(from: webView)
+                                        browserState.reloadTab(tab)
+                                    } else {
+                                        RAMSaverManager.shared.apply(to: webView, tabId: tab.id)
+                                    }
+                                }
+                            }
+                        }) {
+                            HStack {
+                                Image(systemName: level.icon)
+                                Text(level.rawValue)
+                                if RAMSaverManager.shared.globalLevel == level {
+                                    Text("✓")
+                                }
+                            }
+                        }
+                    }
+
+                    if let warning = RAMSaverManager.shared.globalLevel.compatibilityWarning {
+                        Divider()
+                        Text(warning).font(.caption)
+                    }
+                }
             }
 
             CommandMenu("Ver") {
@@ -379,6 +418,36 @@ struct MAIApp: App {
                     }
                 }
                 .keyboardShortcut("t", modifiers: [.command, .shift])
+            }
+
+            CommandMenu("Perfiles") {
+                // Lista de workspaces/perfiles disponibles
+                let wsManager = WorkspaceManager.shared
+                ForEach(wsManager.workspaces) { workspace in
+                    Button(action: {
+                        if workspace.id != browserState.workspaceID {
+                            WindowManager.shared.openNewWindow(workspaceID: workspace.id)
+                        }
+                    }) {
+                        let isActive = workspace.id == browserState.workspaceID
+                        Label(workspace.name + (isActive ? " ✓" : ""),
+                              systemImage: workspace.icon)
+                    }
+                }
+
+                Divider()
+
+                Button("Nuevo Perfil...") {
+                    NotificationCenter.default.post(name: .maiCreateWorkspace, object: nil)
+                }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Configuración...") {
+                    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+                }
+                .keyboardShortcut(",", modifiers: .command)
             }
 
             CommandMenu("Desarrollo") {

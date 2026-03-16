@@ -111,8 +111,10 @@ struct TabBar: View {
     @State private var draggedTabId: UUID?
     @State private var dragOffset: CGFloat = 0
     @State private var dragVerticalOffset: CGFloat = 0
+    @State private var dragStartOffset: CGFloat = 0
     @State private var tabFrames: [UUID: CGRect] = [:]
     @State private var isTearingOff: Bool = false
+    @State private var lastSwapTime: Date = .distantPast
 
     var body: some View {
         HStack(spacing: 0) {
@@ -149,7 +151,19 @@ struct TabBar: View {
                         .zIndex(draggedTabId == tab.id ? 1 : 0)
                         .opacity(draggedTabId == tab.id ? 0.85 : 1.0)
                         .scaleEffect(draggedTabId == tab.id ? 1.05 : 1.0)
-                        .animation(.easeInOut(duration: 0.15), value: draggedTabId)
+                        // Tabs vecinas: animación deslizante 200ms ease-out (como Chrome)
+                        .animation(
+                            draggedTabId != nil && draggedTabId != tab.id
+                                ? .easeOut(duration: 0.2)
+                                : .easeInOut(duration: 0.15),
+                            value: draggedTabId
+                        )
+                        .animation(
+                            draggedTabId != nil && draggedTabId != tab.id
+                                ? .easeOut(duration: 0.2)
+                                : .none,
+                            value: browserState.tabs.map(\.id)
+                        )
                         .onHover { isHovered in
                             hoveredTab = isHovered ? tab.id : nil
                         }
@@ -158,28 +172,36 @@ struct TabBar: View {
                                 .onChanged { value in
                                     if draggedTabId == nil {
                                         draggedTabId = tab.id
+                                        dragStartOffset = 0
                                     }
-                                    dragOffset = value.translation.width
+                                    dragOffset = value.translation.width + dragStartOffset
                                     dragVerticalOffset = value.translation.height
 
-                                    let inTearZone = abs(dragVerticalOffset) > 40
+                                    // Tear-off vertical (>40px arriba/abajo) O horizontal izquierdo
+                                    // (tab cruza el borde izquierdo del tab strip = zona de semáforos)
+                                    var inTearZone = abs(dragVerticalOffset) > 40
+                                    if let draggedFrame = tabFrames[tab.id], browserState.tabs.count > 1 {
+                                        let visualLeft = draggedFrame.minX + dragOffset
+                                        if visualLeft < -20 {
+                                            inTearZone = true
+                                        }
+                                    }
 
                                     if inTearZone && !isTearingOff {
-                                        // Entró en zona de tear-off/merge: mostrar preview
                                         isTearingOff = true
                                         TabDragPreviewWindow.shared.show(tab: tab, at: NSEvent.mouseLocation)
                                     } else if inTearZone && isTearingOff {
-                                        // Mover preview con el cursor
                                         TabDragPreviewWindow.shared.updatePosition(at: NSEvent.mouseLocation)
                                     } else if !inTearZone && isTearingOff {
-                                        // Volvió al tab bar: ocultar preview
                                         isTearingOff = false
                                         TabDragPreviewWindow.shared.dismiss()
                                     }
 
-                                    // Solo reordenar si no está en zona de tear-off
                                     if !inTearZone {
-                                        checkSwap(draggedId: tab.id)
+                                        let now = Date()
+                                        if now.timeIntervalSince(lastSwapTime) > 0.3 {
+                                            checkSwap(draggedId: tab.id)
+                                        }
                                     }
                                 }
                                 .onEnded { value in
@@ -187,12 +209,16 @@ struct TabBar: View {
                                     let verticalDistance = value.translation.height
                                     let screenPoint = NSEvent.mouseLocation
 
-                                    if abs(verticalDistance) > 60 {
-                                        // Primero intentar merge: ¿soltó sobre el tab bar de otra ventana?
+                                    // Tear-off: vertical O si estaba en zona de tear (incluye horizontal)
+                                    var shouldTearOff = abs(verticalDistance) > 60
+                                    if isTearingOff && browserState.tabs.count > 1 {
+                                        shouldTearOff = true
+                                    }
+
+                                    if shouldTearOff {
                                         if let targetState = WindowManager.shared.browserState(at: screenPoint, excluding: browserState) {
                                             WindowManager.shared.mergeTab(tab, into: targetState, from: browserState)
                                         } else if browserState.tabs.count > 1 {
-                                            // Tear off: nueva ventana
                                             WindowManager.shared.openNewWindow(
                                                 withTab: tab,
                                                 from: browserState,
@@ -242,9 +268,11 @@ struct TabBar: View {
         .colorScheme(browserState.isIncognito ? .dark : .light)
     }
 
-    /// Detecta si la tab arrastrada cruzó sobre otra y las intercambia
+    /// Detecta si la tab arrastrada cruzó sobre otra y las intercambia.
+    /// Usa la posición visual (frame + offset) para determinar cruce.
     private func checkSwap(draggedId: UUID) {
         guard let draggedFrame = tabFrames[draggedId] else { return }
+        // Centro visual del tab arrastrado
         let draggedCenter = draggedFrame.midX + dragOffset
 
         guard let fromIndex = browserState.tabs.firstIndex(where: { $0.id == draggedId }) else { return }
@@ -253,18 +281,22 @@ struct TabBar: View {
             if id == draggedId { continue }
             guard let toIndex = browserState.tabs.firstIndex(where: { $0.id == id }) else { continue }
 
-            // Si el centro de la tab arrastrada cruza el centro de otra tab
-            if draggedCenter > frame.midX - frame.width * 0.3 && draggedCenter < frame.midX + frame.width * 0.3 {
+            // Swap cuando el centro del tab arrastrado cruza el midpoint de otra tab
+            // con un threshold de 16px (como Chrome) para evitar jitter
+            let threshold: CGFloat = 16
+            if draggedCenter > frame.midX - threshold && draggedCenter < frame.midX + threshold {
                 if fromIndex != toIndex {
-                    withAnimation(.easeInOut(duration: 0.2)) {
-                        browserState.tabs.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
-                        if let newIndex = browserState.tabs.firstIndex(where: { $0.id == draggedId }) {
-                            browserState.currentTabIndex = newIndex
-                        }
+                    browserState.tabs.move(fromOffsets: IndexSet(integer: fromIndex), toOffset: toIndex > fromIndex ? toIndex + 1 : toIndex)
+                    if let newIndex = browserState.tabs.firstIndex(where: { $0.id == draggedId }) {
+                        browserState.currentTabIndex = newIndex
                     }
-                    // Ajustar offset para compensar el movimiento del array
+                    // Acumular compensación: cuando el array se reordena, la "home position"
+                    // del tab cambia, así que compensamos para que el visual no salte
                     let direction: CGFloat = toIndex > fromIndex ? -1 : 1
-                    dragOffset += direction * draggedFrame.width
+                    dragStartOffset += direction * (frame.width + 2) // +2 por el spacing
+                    // Recalcular dragOffset con la nueva compensación
+                    // (no cambiamos dragOffset directamente — se recalcula en onChanged)
+                    lastSwapTime = Date()
                     break
                 }
             }
@@ -379,6 +411,49 @@ struct TabItem: View {
             Button(action: { browserState.toggleChromeCompatMode(tab) }) {
                 Label(tab.chromeCompatMode ? "Desactivar Modo Chrome" : "Modo Chrome",
                       systemImage: tab.chromeCompatMode ? "globe.badge.chevron.backward" : "globe.americas")
+            }
+            .disabled(tab.isSuspended || tab.useChromiumEngine)
+
+            // Ahorro de RAM por tab
+            Menu {
+                let currentLevel = RAMSaverManager.shared.effectiveLevel(for: tab.id)
+                let hasOverride = tab.ramSaverLevel != nil
+
+                ForEach(RAMSaverLevel.allCases, id: \.self) { level in
+                    Button(action: {
+                        if level == RAMSaverManager.shared.globalLevel {
+                            tab.ramSaverLevel = nil
+                            RAMSaverManager.shared.clearTabLevel(for: tab.id)
+                        } else {
+                            tab.ramSaverLevel = level
+                            RAMSaverManager.shared.setLevel(level, for: tab.id)
+                        }
+                        if let webView = tab.webView {
+                            let effective = RAMSaverManager.shared.effectiveLevel(for: tab.id)
+                            if effective == .off {
+                                RAMSaverManager.shared.removeRuleLists(from: webView)
+                                browserState.reloadTab(tab)
+                            } else {
+                                RAMSaverManager.shared.apply(to: webView, tabId: tab.id)
+                            }
+                        }
+                    }) {
+                        HStack {
+                            Image(systemName: level.icon)
+                            Text(level.rawValue)
+                            if currentLevel == level {
+                                Text("✓")
+                            }
+                            if level == RAMSaverManager.shared.globalLevel && !hasOverride {
+                                Text("(global)")
+                            }
+                        }
+                    }
+                }
+            } label: {
+                let level = RAMSaverManager.shared.effectiveLevel(for: tab.id)
+                Label("Ahorro de RAM" + (level != .off ? " (\(level.rawValue))" : ""),
+                      systemImage: level != .off ? "leaf.fill" : "memorychip")
             }
             .disabled(tab.isSuspended || tab.useChromiumEngine)
 

@@ -5,7 +5,7 @@
 **Nombre:** MAI (Modern AI-Powered Internet Browser)
 **Fecha de Creación:** 2026-01-24
 **Ubicación:** ~/Documents/MAI
-**Estado:** Fase inicial - Estructura y core engine implementados
+**Estado:** v0.9.6-wip — Navegador funcional completo con 40 features (2026-03-11)
 
 ## ¿Qué es MAI?
 
@@ -342,6 +342,8 @@ Cuando el usuario mencione "MAI" o navegador:
 - Consulta ARCHITECTURE.md para decisiones técnicas
 - Consulta TODO.md para próximas tareas
 
-**Estado actual:** Navegador funcional completo (v0.6.0) — WebKit + CEF híbrido, screen sharing HD, modo incógnito, multi-ventana. Todos los crashes conocidos corregidos.
+**Estado actual:** v0.9.6-wip (2026-03-11) — 40 features implementados. WebKit + CEF híbrido, 22 fixes seguridad password manager, DevTools con CDP debugger, YouTube ad blocking 5 capas, anti-fingerprinting 12 vectores, workspaces aislados, traducción de páginas, crash recovery, tab drag Chrome-like.
 
-**Siguiente objetivo:** Preparar lanzamiento (Apple Developer, notarización, modelo freemium).
+**CHANGELOG maestro:** ~/Documents/MAI/CHANGELOG.md — historial completo de cada versión con detalle técnico.
+
+**Siguiente objetivo:** Commit v0.9.6 (workspaces menu + tab drag + translation fix), luego features pendientes del roadmap v1.0.

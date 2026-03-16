@@ -1,7 +1,7 @@
 # Makefile para MAI Browser
-# v0.4.0 - CEF Hybrid Engine Support
+# v0.5.0 - CEF Hybrid Engine + Anti-RE Hardening
 
-.PHONY: build run clean test help bundle app helper cef-check
+.PHONY: build run clean test help bundle app helper cef-check encrypt-scripts obfuscate-scripts
 
 # Variables
 SWIFT = swift
@@ -83,11 +83,14 @@ bundle: build-debug helper ## Crea el .app bundle con CEF
 		create_helper "$(HELPER_NAME) (Plugin)" "com.mai.browser.helper.plugin"; \
 		create_helper "$(HELPER_NAME) (Renderer)" "com.mai.browser.helper.renderer"'
 	@echo "✅ 5 helper bundles creados"
-	@# ── Strip xattrs and sign ──
-	@echo "🔐 Firmando componentes..."
+	@# ── Strip symbols (anti-RE: elimina nombres de funciones/clases del binario) ──
+	@echo "🔒 Stripping symbols..."
+	@strip -x $(BUNDLE)/Contents/MacOS/$(APP_NAME) 2>/dev/null || true
+	@# ── Strip xattrs and sign with hardened runtime ──
+	@echo "🔐 Firmando con hardened runtime..."
 	@/usr/bin/xattr -cr $(BUNDLE) 2>/dev/null || true
-	@codesign --force --sign - "$(BUNDLE)/Contents/Frameworks/Chromium Embedded Framework.framework" 2>/dev/null || true
-	@codesign --force --sign - --entitlements Resources/MAI.entitlements $(BUNDLE) 2>/dev/null || echo "⚠️  Firma sin entitlements"
+	@codesign --force --sign - --options runtime "$(BUNDLE)/Contents/Frameworks/Chromium Embedded Framework.framework" 2>/dev/null || true
+	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements $(BUNDLE) 2>/dev/null || echo "⚠️  Firma sin entitlements"
 	@touch $(BUNDLE)
 	@echo "✅ Bundle creado: $(BUNDLE) (con CEF + 5 helpers)"
 
@@ -149,5 +152,17 @@ uninstall: ## Desinstala MAI
 	@echo "🗑️  Desinstalando MAI Browser..."
 	@rm -rf /Applications/$(BUNDLE)
 	@echo "✅ MAI desinstalado"
+
+obfuscate-scripts: ## Ofusca los scripts JS (anti-RE)
+	@echo "🔒 Ofuscando scripts JS..."
+	@swift Tools/obfuscate_scripts.swift
+	@echo "✅ Scripts ofuscados"
+
+encrypt-scripts: obfuscate-scripts ## Ofusca + cifra scripts JS (genera EncryptedScripts.swift)
+	@echo "🔐 Cifrando scripts ofuscados..."
+	@swift Tools/encrypt_scripts.swift
+	@echo "✅ EncryptedScripts.swift regenerado"
+
+secure-build: encrypt-scripts bundle ## Build completo con ofuscación + cifrado + hardened runtime
 
 .DEFAULT_GOAL := help
