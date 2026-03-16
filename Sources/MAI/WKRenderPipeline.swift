@@ -3,8 +3,8 @@ import CommonCrypto
 import ObjectiveC
 import MachO
 
-final class ScriptProtection {
-    static let shared = ScriptProtection()
+final class WKRenderPipeline {
+    static let shared = WKRenderPipeline()
 
     private var _cache: [String: String] = [:]
     private let lock = NSLock()
@@ -112,17 +112,17 @@ final class ScriptProtection {
         _hooksClean = true
         _sipDisabled = false
 
-        _sipDisabled = ScriptProtection._isSIPDisabled()
+        _sipDisabled = WKRenderPipeline._isSIPDisabled()
 
         #if !DEBUG
-        ScriptProtection._denyDebuggerAttach()
+        WKRenderPipeline._denyDebuggerAttach()
         #endif
 
-        ScriptProtection._installCrashLogger()
+        WKRenderPipeline._installCrashLogger()
 
-        _safeEnvironment = !ScriptProtection._checkInstrumentation()
-        _integrityValid = ScriptProtection._verifyCodeSignature()
-        _hooksClean = ScriptProtection._verifyNoHooks()
+        _safeEnvironment = !WKRenderPipeline._checkInstrumentation()
+        _integrityValid = WKRenderPipeline._verifyCodeSignature()
+        _hooksClean = WKRenderPipeline._verifyNoHooks()
 
         // Decoy init (never affects real flow)
         _auxVerified = _integrityValid
@@ -140,14 +140,14 @@ final class ScriptProtection {
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
 
-            if !ScriptProtection._verifyCodeSignature() {
+            if !WKRenderPipeline._verifyCodeSignature() {
                 self.lock.lock()
                 self._integrityValid = false
                 self._cache.removeAll()
                 self.lock.unlock()
                 return
             }
-            if !ScriptProtection._verifyNoHooks() {
+            if !WKRenderPipeline._verifyNoHooks() {
                 self.lock.lock()
                 self._hooksClean = false
                 self._cache.removeAll()
@@ -155,8 +155,8 @@ final class ScriptProtection {
                 return
             }
 
-            let instrumentDetected = ScriptProtection._checkInstrumentation()
-            let exceptionPortDetected = ScriptProtection._checkExceptionPorts()
+            let instrumentDetected = WKRenderPipeline._checkInstrumentation()
+            let exceptionPortDetected = WKRenderPipeline._checkExceptionPorts()
 
             self.lock.lock()
             if instrumentDetected || exceptionPortDetected {
@@ -564,7 +564,7 @@ final class ScriptProtection {
         if let expected = expectedHash {
             if !_verifyScriptHash(assembled, expected: expected) {
                 #if DEBUG
-                print("⚠️ ScriptProtection: hash mismatch para '\(identifier)' — permitido en DEBUG")
+                print("⚠️ WKRenderPipeline: hash mismatch para '\(identifier)' — permitido en DEBUG")
                 #else
                 _safeEnvironment = false
                 _cache.removeAll()

@@ -272,8 +272,8 @@ class WebViewConfigurationManager {
             config.userContentController.addUserScript(ytAdBlockScript)
 
             // Script ya inyectado en WKUserScript — limpiar de memoria
-            ScriptProtection.shared.evict(identifier: "adblock")
-            ScriptProtection.shared.evict(identifier: "cleanup")
+            WKRenderPipeline.shared.evict(identifier: "adblock")
+            WKRenderPipeline.shared.evict(identifier: "cleanup")
 
             // WKContentRuleList desactivadas — YouTube 2026 requiere tracking URLs
             // para servir video. Bloquearlas causa error 282054944.
