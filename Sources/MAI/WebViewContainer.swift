@@ -260,6 +260,16 @@ class WebViewConfigurationManager {
             }
         }
 
+        // MutationObserver para ads dinámicos — elementos inyectados por JS DESPUÉS del page load.
+        // WKContentRuleList css-display-none no los alcanza si no existían al cargar.
+        // Este script cubre sitios conocidos donde EasyList tiene reglas pero los ads son dinámicos.
+        let dynamicAdRemoverScript = WKUserScript(
+            source: Self.dynamicAdRemoverJS,
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        )
+        config.userContentController.addUserScript(dynamicAdRemoverScript)
+
         // YouTube ad blocking: JS pasivo (mute + overlay + click skip)
         // YouTube 2026 detecta: playbackRate, currentTime, classList.remove, network blocking
         // Enfoque v3: NO tocar video element ni player state, solo mute + overlay + skip button
@@ -291,6 +301,59 @@ class WebViewConfigurationManager {
     /// Script que detecta el UA para decidir si spoofear como Safari o Chrome.
     /// Si el UA contiene "Chrome/" → inyecta propiedades de Chrome (compat mode).
     /// Si no → oculta rastros de Chrome (modo Safari normal).
+    /// Elimina ads dinámicos inyectados por JS después del page load.
+    /// Cubre selectores que EasyList css-display-none no alcanza por ser elementos tardíos.
+    static let dynamicAdRemoverJS = """
+    (function() {
+        const rules = {
+            'speedtest.net': [
+                '[class*="pure-u-custom-ad"]',
+                '[class*="pure-u-custom-wifi"]',
+                '.top-placeholder',
+                '.ookla-ad',
+                '[class*="ad-container"]',
+                '[class*="advertisement"]',
+                '[id*="div-gpt-ad"]',
+                'ins.adsbygoogle',
+                '[data-ad-slot]',
+                '.leaderboard',
+                '.skyscraper'
+            ],
+            'fast.com': [
+                '.ad', '[class*="ad-"]'
+            ]
+        };
+
+        const host = location.hostname.replace(/^www\\./, '');
+        const selectors = Object.entries(rules).find(([d]) => host === d || host.endsWith('.' + d))?.[1];
+        if (!selectors || selectors.length === 0) return;
+
+        function removeAds() {
+            selectors.forEach(function(sel) {
+                document.querySelectorAll(sel).forEach(function(el) {
+                    // visibility:hidden preserva el espacio del layout (no descuadra la página)
+                    // display:none colapsaría el grid de Pure CSS y rompería el diseño
+                    el.style.setProperty('visibility', 'hidden', 'important');
+                    el.style.setProperty('pointer-events', 'none', 'important');
+                    // Vaciar el contenido (iframes, scripts) para no cargar el ad
+                    el.innerHTML = '';
+                });
+            });
+        }
+
+        // Limpiar al cargar
+        if (document.readyState !== 'loading') {
+            removeAds();
+        } else {
+            document.addEventListener('DOMContentLoaded', removeAds);
+        }
+
+        // MutationObserver para elementos inyectados después del test
+        const observer = new MutationObserver(removeAds);
+        observer.observe(document.documentElement, { childList: true, subtree: true });
+    })();
+    """
+
     private static let navigatorSpoofingScript = """
     (function() {
         // Ocultar webdriver en ambos modos
@@ -417,15 +480,21 @@ struct WebViewRepresentable: NSViewRepresentable {
         // Register Triple Playback message handler (YouTube ad blocking role-swap)
         config.userContentController.add(context.coordinator, name: "maiTriplePlaybackSwap")
 
-        // Register DevTools message handlers (console log + network interception)
-        config.userContentController.add(context.coordinator, name: "maiDevToolsConsole")
-        config.userContentController.add(context.coordinator, name: "maiDevToolsNetwork")
+        // Register insecure navigation handler (error page "Continuar de todos modos")
+        config.userContentController.add(context.coordinator, name: "maiInsecureNavigate")
 
-        // Auto-inject DevTools scripts on every page load (atDocumentStart = before page JS runs)
-        let consoleScript = WKUserScript(source: DevToolsScripts.consoleInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-        let networkScript = WKUserScript(source: DevToolsScripts.networkInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false)
-        config.userContentController.addUserScript(consoleScript)
-        config.userContentController.addUserScript(networkScript)
+        // DevTools: solo inyectar interceptores si Developer Tools está habilitado en Settings
+        // El network interceptor wrappea fetch/XHR/WebSocket y envía postMessage por cada petición.
+        // En sitios con muchas peticiones (speedtest, etc.) esto satura el bridge JS→Swift.
+        if UserDefaults.standard.bool(forKey: "enableDeveloperTools") {
+            config.userContentController.add(context.coordinator, name: "maiDevToolsConsole")
+            config.userContentController.add(context.coordinator, name: "maiDevToolsNetwork")
+
+            let consoleScript = WKUserScript(source: DevToolsScripts.consoleInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+            let networkScript = WKUserScript(source: DevToolsScripts.networkInterceptor, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+            config.userContentController.addUserScript(consoleScript)
+            config.userContentController.addUserScript(networkScript)
+        }
 
         // Crear WebView con configuración compartida
         let webView = WKWebView(frame: .zero, configuration: config)
@@ -509,6 +578,15 @@ struct WebViewRepresentable: NSViewRepresentable {
                 handleDevToolsConsole(message)
             } else if message.name == "maiDevToolsNetwork" {
                 handleDevToolsNetwork(message)
+            } else if message.name == "maiInsecureNavigate" {
+                handleInsecureNavigate(message)
+            }
+        }
+
+        private func handleInsecureNavigate(_ message: WKScriptMessage) {
+            guard let urlString = message.body as? String else { return }
+            DispatchQueue.main.async {
+                self.tab.navigate(to: urlString)
             }
         }
 
@@ -774,6 +852,82 @@ struct WebViewRepresentable: NSViewRepresentable {
             tab.isLoading = false
             browserState.isLoading = false
             print("Provisional navigation failed: \(error.localizedDescription)")
+
+            let nsError = error as NSError
+            let failedURL = nsError.userInfo[NSURLErrorFailingURLStringErrorKey] as? String ?? tab.url
+
+            // Códigos de error SSL/TLS
+            let sslCodes: Set<Int> = [-1200, -1201, -1202, -1203, -1204]
+            let isSSLError = nsError.domain == NSURLErrorDomain && sslCodes.contains(nsError.code)
+
+            // Versión http:// como alternativa para servidores sin certificado
+            let httpAlternative = failedURL.hasPrefix("https://")
+                ? failedURL.replacingOccurrences(of: "https://", with: "http://", range: failedURL.range(of: "https://"))
+                : nil
+
+            let errorHTML = Self.buildErrorPage(
+                url: failedURL,
+                error: nsError,
+                isSSLError: isSSLError,
+                httpAlternative: httpAlternative
+            )
+            webView.loadHTMLString(errorHTML, baseURL: nil)
+        }
+
+        private static func buildErrorPage(url: String, error: NSError, isSSLError: Bool, httpAlternative: String?) -> String {
+            let title = isSSLError ? "Conexión no segura" : "No se puede conectar"
+            let icon = isSSLError ? "🔒" : "⚠️"
+
+            let sslDescription = """
+            <p>El sitio <strong>\(url)</strong> usa un certificado de seguridad que MAI no puede verificar.</p>
+            <p>Esto puede ocurrir en servidores de desarrollo local o sitios con certificados autofirmados.</p>
+            """
+            let genericDescription = """
+            <p>No se pudo cargar <strong>\(url)</strong>.</p>
+            <p class="technical">\(error.localizedDescription)</p>
+            """
+
+            let proceedButton = isSSLError && httpAlternative != nil ? """
+            <button class="btn-danger" onclick="window.webkit.messageHandlers.maiInsecureNavigate.postMessage('\(httpAlternative!)')">
+                Continuar con HTTP (inseguro)
+            </button>
+            """ : ""
+
+            return """
+            <!DOCTYPE html>
+            <html>
+            <head>
+            <meta charset="UTF-8">
+            <style>
+                body { font-family: -apple-system, sans-serif; background: #1a1a2e; color: #e0e0e0;
+                       display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+                .card { background: #16213e; border-radius: 16px; padding: 48px; max-width: 520px;
+                        text-align: center; box-shadow: 0 8px 32px rgba(0,0,0,0.4); }
+                .icon { font-size: 64px; margin-bottom: 16px; }
+                h1 { font-size: 24px; font-weight: 600; margin: 0 0 16px; color: #fff; }
+                p { font-size: 15px; line-height: 1.6; color: #aaa; margin: 8px 0; }
+                .technical { font-size: 12px; color: #666; font-family: monospace; margin-top: 12px; }
+                .actions { display: flex; gap: 12px; justify-content: center; margin-top: 32px; flex-wrap: wrap; }
+                button { padding: 10px 24px; border-radius: 8px; border: none; cursor: pointer;
+                         font-size: 14px; font-weight: 500; transition: opacity 0.2s; }
+                button:hover { opacity: 0.85; }
+                .btn-primary { background: #0f3460; color: #fff; }
+                .btn-danger { background: #7a1c1c; color: #fca5a5; }
+            </style>
+            </head>
+            <body>
+            <div class="card">
+                <div class="icon">\(icon)</div>
+                <h1>\(title)</h1>
+                \(isSSLError ? sslDescription : genericDescription)
+                <div class="actions">
+                    <button class="btn-primary" onclick="history.back()">← Volver</button>
+                    \(proceedButton)
+                </div>
+            </div>
+            </body>
+            </html>
+            """
         }
 
         func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {

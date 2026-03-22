@@ -122,7 +122,10 @@ class PrivacyManager: ObservableObject {
         "recaptcha.net",
         "challenges.cloudflare.com",
         "hcaptcha.com",
-        "js.hcaptcha.com"
+        "js.hcaptcha.com",
+
+        // Speedtest de Cloudflare (solo el subdominio específico, no todo cloudflare.com)
+        "speed.cloudflare.com"
     ]
 
     // MARK: - Dominios de Trackers/Ads a bloquear
