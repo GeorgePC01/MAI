@@ -86,6 +86,27 @@ Brave usa BAT (crypto tokens): volátil, confuso, difícil de convertir, requier
 
 ---
 
+## v0.9.7.3 (2026-03-22 CST) — Speedtest Fix + Ad Block Mejorado + Localhost HTTP
+
+### Fixes de Rendimiento
+- **DevTools network interceptor condicional**: el script que wrappea fetch/XHR/WebSocket ahora solo se inyecta si Developer Tools está habilitado en Settings. Antes se inyectaba en todas las tabs — en speedtest.net generaba cientos de `postMessage` JS→Swift por cada petición de medición, saturando el bridge y ralentizando el test notablemente.
+
+### Anti-Fingerprinting — Bypass por Dominio
+- **Sitios de medición de red bypass**: speedtest.net, ookla.com, fast.com, nperf.com, speed.cloudflare.com, speedof.me, testmy.net quedan exentos del anti-fingerprinting. El gauge/medidor de velocidad usa canvas y WebGL de forma funcional (no de tracking) — el ruido de píxeles rompía la animación y la visualización de resultados.
+
+### Ad Blocker — MutationObserver para Ads Dinámicos
+- **Ads post-test speedtest.net**: el widget de recomendación ISP/WiFi y el banner rectangular se inyectan por JavaScript DESPUÉS de que termina el test. WKContentRuleList `css-display-none` no los alcanza por ser elementos tardíos. Se agregó un MutationObserver que vigila el DOM en tiempo real y aplica `visibility: hidden` (preserva el layout, no descuadra la página) tan pronto aparecen.
+- **Selectores cubiertos**: `[class*="pure-u-custom-ad"]`, `[class*="pure-u-custom-wifi"]`, `.top-placeholder`, `ins.adsbygoogle`, `[data-ad-slot]`, `[id*="div-gpt-ad"]`, `.leaderboard`, `.skyscraper`.
+
+### Fix Navegación Local (localhost / IPs privadas)
+- **Autocomplete HTTP para URLs locales**: `localhost`, `localhost:PORT`, `127.x.x.x`, `192.168.x.x`, `10.x.x.x`, `172.16-31.x.x` ahora usan `http://` automáticamente en lugar de buscar en Google o forzar `https://`. Fundamental para desarrollo local.
+- **Página de error SSL**: cuando una navegación falla por certificado inválido/autofirmado, se muestra página de error con diseño propio en lugar de pantalla en blanco. Incluye botón "Continuar con HTTP" para servidores de desarrollo sin certificado.
+
+### Fix Whitelist EasyList
+- **cloudflare.com removido del whitelist**: se identificó que `*cloudflare.com` en `isOAuthDomain()` verificaba el host de CADA petición, no solo el documento. Muchos anuncios de Google se sirven por CDN de Cloudflare — el whitelist los pasaba sin filtro. Se mantiene solo `speed.cloudflare.com` (subdominio específico del speed test).
+
+---
+
 ## v0.9.7.2 (2026-03-16 02:30 CST) — Ad Blocker Fixes + Anti-Kong + macOS 26 Codesign
 
 ### Anti-Kong Hardening (Capa 10)

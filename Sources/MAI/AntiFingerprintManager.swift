@@ -92,11 +92,33 @@ class AntiFingerprintManager {
 
     // MARK: - Script Components
 
+    /// Dominios donde el anti-fingerprinting se desactiva completamente.
+    /// Sitios de medición de red usan canvas/WebGL de forma funcional (no de tracking).
+    private static let fingerprintBypassDomains: [String] = [
+        "speedtest.net",
+        "ookla.com",
+        "fast.com",
+        "nperf.com",
+        "speed.cloudflare.com",
+        "speedof.me",
+        "testmy.net"
+    ]
+
     private func scriptHeader() -> String {
+        let bypassList = Self.fingerprintBypassDomains
+            .map { "\"\($0)\"" }
+            .joined(separator: ", ")
+
         return """
         (function() {
             'use strict';
             if (window._maiAntiFingerprint) return;
+
+            // Bypass completo en sitios de medición de red
+            const _maiFpBypass = [\(bypassList)];
+            const _maiHost = location.hostname.replace(/^www\\./, '');
+            if (_maiFpBypass.some(d => _maiHost === d || _maiHost.endsWith('.' + d))) return;
+
             window._maiAntiFingerprint = true;
 
             const SESSION_SEED = \(sessionSeed);

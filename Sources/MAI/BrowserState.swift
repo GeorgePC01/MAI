@@ -310,8 +310,11 @@ class BrowserState: ObservableObject {
 
         // Auto-completar protocolo
         if !finalURL.hasPrefix("http://") && !finalURL.hasPrefix("https://") {
-            // Si parece un dominio, agregar https
-            if finalURL.contains(".") && !finalURL.contains(" ") {
+            // URLs locales (localhost, 127.x, 192.168.x, etc.) → http:// sin certificado
+            if Self.isLocalURL(finalURL) {
+                finalURL = "http://" + finalURL
+            } else if finalURL.contains(".") && !finalURL.contains(" ") {
+                // Dominio externo → https
                 finalURL = "https://" + finalURL
             } else {
                 // Si no, buscar en Google
@@ -780,6 +783,27 @@ class BrowserState: ObservableObject {
     var videoConferenceServiceName: String {
         guard let url = currentTab?.url else { return "" }
         return Self.videoConferenceServiceName(for: url)
+    }
+
+    /// Detecta si una URL apunta a un host local (sin certificado SSL)
+    /// localhost, 127.x.x.x, 192.168.x.x, 10.x.x.x, 172.16-31.x.x
+    static func isLocalURL(_ urlString: String) -> Bool {
+        // Quitar puerto si lo tiene para comparar solo el host
+        let host = urlString.components(separatedBy: ":").first ?? urlString
+        let lower = host.lowercased()
+
+        if lower == "localhost" || lower.hasPrefix("localhost:") { return true }
+        if lower.hasPrefix("127.") { return true }
+        if lower.hasPrefix("192.168.") { return true }
+        if lower.hasPrefix("10.") { return true }
+
+        // 172.16.0.0/12 → segundo octeto entre 16 y 31
+        let parts = lower.components(separatedBy: ".")
+        if parts.count >= 2 && parts[0] == "172",
+           let second = Int(parts[1]), second >= 16 && second <= 31 {
+            return true
+        }
+        return false
     }
 
     // MARK: - Zoom
