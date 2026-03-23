@@ -182,6 +182,43 @@ func obfuscateStrings(_ js: String) -> String {
     return result
 }
 
+// MARK: - Fix embedded table refs in string literals
+// When a sensitive string like "skip-button" appears inside a larger single-quoted
+// string (e.g., '[id^="skip-button"]'), the replacement leaves _$(N) as literal text
+// inside the quotes instead of a callable function. This pass detects those cases
+// and breaks the string into proper concatenation: '[id^=' + _$(63) + ']'.
+
+func fixEmbeddedTableRefs(_ js: String) -> String {
+    var result = js
+    // Match a single-quoted string that contains _$(N) inside it.
+    // Use anchors: _$( must appear immediately after = or ^ or a space/[ inside the string,
+    // and the string must start/end with a lone quote (not already split).
+    // We require that no '+' appears in the match so we don't re-process already-fixed output.
+    // Also exclude ',' and '\n' to prevent cross-string-literal matching when
+    // adjacent array entries have closing/opening quotes separated by commas.
+    let pattern = #"'([^'+,\n]*?)_\$\((\d+)\)([^'+,\n]*)'"#
+    guard let regex = try? NSRegularExpression(pattern: pattern) else { return result }
+
+    // Single pass only — avoids re-matching the fixed output where adjacent string
+    // literals like 'before' + _$(N) + 'after' could form a false cross-literal match.
+    let matches = regex.matches(in: result, range: NSRange(result.startIndex..., in: result))
+    for match in matches.reversed() {
+        guard let fullRange = Range(match.range, in: result),
+              let r1 = Range(match.range(at: 1), in: result),
+              let r2 = Range(match.range(at: 2), in: result),
+              let r3 = Range(match.range(at: 3), in: result) else { continue }
+        let beforeStr = String(result[r1])
+        let idxStr    = String(result[r2])
+        let afterStr  = String(result[r3])
+        var parts: [String] = []
+        if !beforeStr.isEmpty { parts.append("'\(beforeStr)'") }
+        parts.append("_$(\(idxStr))")
+        if !afterStr.isEmpty { parts.append("'\(afterStr)'") }
+        result.replaceSubrange(fullRange, with: parts.joined(separator: "+"))
+    }
+    return result
+}
+
 // MARK: - Variable renaming
 
 func obfuscateVariables(_ js: String) -> String {
@@ -381,6 +418,9 @@ for file in files {
 
     // Step 1: Register and encode strings into table
     js = obfuscateStrings(js)
+
+    // Step 1b: Fix any _$(N) refs that landed inside single-quoted string literals
+    js = fixEmbeddedTableRefs(js)
 
     // Step 2: Generate string table JS
     let tableJS = generateStringTableJS()
