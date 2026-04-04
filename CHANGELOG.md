@@ -86,6 +86,21 @@ Brave usa BAT (crypto tokens): volátil, confuso, difícil de convertir, requier
 
 ---
 
+## v0.9.7.5 (2026-04-03 CST) — CEF Codesign Fix macOS 26 + EasyList Regex Validation
+
+### CEF Codesign Fix — macOS 26 Provenance
+- **Problema**: `dlopen` del Chromium Embedded Framework fallaba con "different Team IDs" en macOS 26. Causa: `com.apple.provenance` xattr agregado automáticamente al copiar bundle a `~/Documents/`, invalidando la firma ad-hoc.
+- **Diagnóstico**: `codesign --verify --deep --strict` fallaba por "resource fork, Finder information, or similar detritus" en los CEF Helper bundles. `xattr -lr` confirmó `com.apple.provenance`, `com.apple.FinderInfo`, y `com.apple.fileprovider.fpfs#P` en todos los componentes.
+- **Solución**: Makefile ahora hace double-sign: firma en `/tmp/_mai_sign/` (limpio) + re-firma en destino final después del `ditto --norsrc`. Se limpia **todos** los xattrs con `xattr -cr` antes de cada firma.
+- **Impacto**: Google Meet, Zoom y Teams no cargaban — CEF `dlopen` fallaba silenciosamente y el navegador caía a "ERROR: Failed to load CEF framework library".
+
+### EasyList Regex Validation
+- **Problema**: Reglas EasyList con patrones regex complejos (ej: `$` end-of-line assertion después de character class expandido desde `^`) causaban error de parsing en WebKit: "The end of line assertion must be the last term in an expression".
+- **Solución**: `convertToURLFilter()` ahora valida cada regex generada con `NSRegularExpression` antes de agregarla a la lista de reglas. Patrones inválidos se descartan silenciosamente.
+- **Impacto**: Elimina errores de consola ruidosos al iniciar el navegador. No afecta cobertura de bloqueo — las reglas rechazadas son edge cases de EasyList incompatibles con WebKit.
+
+---
+
 ## v0.9.7.3 (2026-03-22 CST) — Speedtest Fix + Ad Block Mejorado + Localhost HTTP
 
 ### Fixes de Rendimiento
