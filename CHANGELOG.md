@@ -86,6 +86,27 @@ Brave usa BAT (crypto tokens): volátil, confuso, difícil de convertir, requier
 
 ---
 
+## v0.9.7.6 (2026-04-04 CST) — Chrome-Style Screen Sharing Picker
+
+### Screen Picker Redesign
+- **NSPanel custom** reemplaza NSAlert: diseño propio estilo Chrome en vez del picker genérico de macOS.
+- **Tabs de texto con underline azul**: "Ventana" | "Pantalla completa" (antes NSSegmentedControl pill-shaped).
+- **Thumbnails grandes**: 280×180px en grid de 2 columnas (antes 160×100 en 3 columnas).
+- **Botón "Compartir" azul**: consistente con Chrome (antes rojo).
+- **Icono de speaker** (SF Symbols `speaker.wave.2`) junto al toggle "Compartir también el audio del sistema".
+- **Título dinámico**: "Elige qué quieres compartir con [dominio]" — dominio extraído del `origin_url` de CEF.
+- **Selección azul claro sutil**: borde azul + fondo 6% opacity (como Chrome).
+
+### Crash Fix — Use-After-Free en Screen Picker
+- **Bug**: `origin_url` (puntero CEF) se accedía dentro del `dispatch_async` block del picker, pero CEF lo libera al retornar `on_jsdialog` → crash SIGTRAP en `cef_string_utf16_to_utf8`.
+- **Fix**: dominio se extrae a NSString **antes** de entrar al block async, mientras el puntero CEF aún es válido.
+
+### MAIPickerHelper
+- Nueva clase `MAIPickerHelper` (`NSWindowDelegate`) maneja tab switching, botones Share/Cancel, y cierre de ventana.
+- Propiedades para tabs y underline indicator permiten actualizar UI desde `tabChanged:`.
+
+---
+
 ## v0.9.7.5 (2026-04-03 CST) — CEF Codesign Fix macOS 26 + EasyList Regex Validation
 
 ### CEF Codesign Fix — macOS 26 Provenance
