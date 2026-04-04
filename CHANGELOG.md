@@ -105,6 +105,16 @@ Brave usa BAT (crypto tokens): volátil, confuso, difícil de convertir, requier
 ### Fix Whitelist EasyList
 - **cloudflare.com removido del whitelist**: se identificó que `*cloudflare.com` en `isOAuthDomain()` verificaba el host de CADA petición, no solo el documento. Muchos anuncios de Google se sirven por CDN de Cloudflare — el whitelist los pasaba sin filtro. Se mantiene solo `speed.cloudflare.com` (subdominio específico del speed test).
 
+### Anti-RE Layer 9c — XOR Multi-Byte (commit 223398f)
+- **Clave single-byte 0xC7 reemplazada por clave 8 bytes**: el esquema anterior usaba `b ^ (0xC7 + i)` — brute-forceable con 256 intentos. Ahora: `b ^ (_ka[i%8] ^ _kb[i%8])` con clave derivada en runtime.
+- **Clave dividida en dos arrays `_ka`/`_kb`**: ninguno revela la clave completa por sí solo — el binario no expone ninguna constante directa.
+- **20 arrays `_s_*` y 3 decoys re-codificados** con la nueva clave. Decode/encode simétricos verificados.
+- **YouTube smoke test OK** tras el cambio.
+
+### Skills Claude Code — MAI
+- **`/mai-anti-re-update`**: movido de `~/.claude/skills/` a `~/.claude/commands/` (directorio correcto).
+- **`/mai-obfuscator-fix`** creado: skill dedicado para diagnosticar y corregir bugs en `Tools/obfuscate_scripts.swift` sin romper `make app`.
+
 ---
 
 ## v0.9.7.2 (2026-03-16 02:30 CST) — Ad Blocker Fixes + Anti-Kong + macOS 26 Codesign
