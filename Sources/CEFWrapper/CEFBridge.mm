@@ -992,6 +992,42 @@ static void init_permission_handler() {
     g_permissionHandler.on_dismiss_permission_prompt = on_dismiss_permission_prompt;
 }
 
+// MARK: - Screen Picker Helper (Chrome-style NSPanel)
+
+@interface MAIPickerHelper : NSObject <NSWindowDelegate>
+@property (nonatomic, strong) NSScrollView* windowsScrollView;
+@property (nonatomic, strong) NSScrollView* screensScrollView;
+@property (nonatomic, weak) NSView* tabIndicator;
+@property (nonatomic, weak) NSButton* tabWindows;
+@property (nonatomic, weak) NSButton* tabScreens;
+- (void)tabChanged:(NSButton*)sender;
+- (void)shareClicked:(id)sender;
+- (void)cancelClicked:(id)sender;
+- (void)windowWillClose:(NSNotification*)notification;
+@end
+
+@implementation MAIPickerHelper
+- (void)tabChanged:(NSButton*)sender {
+    BOOL showWindows = (sender.tag == 0);
+    self.windowsScrollView.hidden = !showWindows;
+    self.screensScrollView.hidden = showWindows;
+    // Update tab colors
+    self.tabWindows.contentTintColor = showWindows ? [NSColor systemBlueColor] : [NSColor secondaryLabelColor];
+    self.tabScreens.contentTintColor = showWindows ? [NSColor secondaryLabelColor] : [NSColor systemBlueColor];
+    // Move underline
+    if (self.tabIndicator) {
+        NSButton* activeBtn = showWindows ? self.tabWindows : self.tabScreens;
+        NSRect f = self.tabIndicator.frame;
+        f.origin.x = activeBtn.frame.origin.x;
+        f.size.width = activeBtn.frame.size.width;
+        self.tabIndicator.frame = f;
+    }
+}
+- (void)shareClicked:(id)sender { [NSApp stopModalWithCode:NSModalResponseOK]; }
+- (void)cancelClicked:(id)sender { [NSApp stopModalWithCode:NSModalResponseCancel]; }
+- (void)windowWillClose:(NSNotification*)notification { [NSApp stopModalWithCode:NSModalResponseCancel]; }
+@end
+
 // MARK: - Window Capture (ScreenCaptureKit direct capture for window sharing)
 
 @interface MAICaptureOutput : NSObject <SCStreamOutput>
@@ -1184,6 +1220,16 @@ static int CEF_CALLBACK on_jsdialog(
     cef_log_to_file("Screen picker: Intercepted MAI_SCREEN_PICKER prompt");
     cef_addref(&callback->base);
 
+    // Extract domain NOW while origin_url is still valid (CEF frees it after on_jsdialog returns)
+    NSString* pickerDomain = @"este sitio";
+    if (origin_url && origin_url->str && origin_url->length > 0) {
+        NSString* originStr = nsstring_from_cef_string(origin_url);
+        if ([originStr hasPrefix:@"http"]) {
+            NSURL* url = [NSURL URLWithString:originStr];
+            if (url.host) pickerDomain = [url.host copy];
+        }
+    }
+
     [SCShareableContent getShareableContentExcludingDesktopWindows:NO
                                              onScreenWindowsOnly:YES
                                                completionHandler:^(SCShareableContent* content, NSError* error) {
@@ -1234,15 +1280,17 @@ static int CEF_CALLBACK on_jsdialog(
                             (unsigned long)displays.count,
                             (unsigned long)filteredWindows.count);
 
-            // --- Build visual picker with thumbnails ---
+            // --- Chrome-style screen picker with NSPanel ---
 
-            static const CGFloat kThumbW = 160.0;
-            static const CGFloat kThumbH = 100.0;
-            static const CGFloat kItemW = 170.0;
-            static const CGFloat kItemH = 140.0;
-            static const CGFloat kPadding = 10.0;
-            static const CGFloat kSectionPad = 8.0;
-            static const int kColumns = 3;
+            static const CGFloat kThumbW = 280.0;
+            static const CGFloat kThumbH = 180.0;
+            static const CGFloat kItemW = 300.0;
+            static const CGFloat kItemH = 220.0;
+            static const CGFloat kPadding = 16.0;
+            static const int kColumns = 2;
+
+            // Use domain extracted BEFORE async block (origin_url is freed by CEF after on_jsdialog returns)
+            NSString* domain = pickerDomain;
 
             // Helper: get real display name from NSScreen
             NSString* (^getDisplayName)(SCDisplay*, NSUInteger) = ^NSString*(SCDisplay* display, NSUInteger index) {
@@ -1252,7 +1300,7 @@ static int CEF_CALLBACK on_jsdialog(
                         return screen.localizedName;
                     }
                 }
-                return [NSString stringWithFormat:@"Screen %lu", (unsigned long)(index + 1)];
+                return [NSString stringWithFormat:@"Pantalla %lu", (unsigned long)(index + 1)];
             };
 
             // Helper: create scaled thumbnail from CGImage
@@ -1340,82 +1388,173 @@ static int CEF_CALLBACK on_jsdialog(
                 [windowItems addObject:item];
             }
 
-            // Layout helper: arrange items in rows
-            NSView* (^makeSection)(NSString*, NSArray<NSView*>*) = ^NSView*(NSString* title, NSArray<NSView*>* items) {
-                if (items.count == 0) return nil;
+            // Layout helper: arrange items in a grid (no section header)
+            NSView* (^makeGrid)(NSArray<NSView*>*) = ^NSView*(NSArray<NSView*>* items) {
+                if (items.count == 0) return [[NSView alloc] initWithFrame:NSZeroRect];
                 NSUInteger rows = (items.count + kColumns - 1) / kColumns;
-                CGFloat sectionW = kColumns * kItemW + (kColumns - 1) * kPadding;
-                CGFloat sectionH = 24 + rows * kItemH + (rows - 1) * kPadding;
+                CGFloat gridW = kColumns * kItemW + (kColumns - 1) * kPadding;
+                CGFloat gridH = rows * kItemH + (rows - 1) * kPadding;
 
-                NSView* section = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, sectionW, sectionH)];
-
-                NSTextField* header = [NSTextField labelWithString:title];
-                header.frame = NSMakeRect(0, sectionH - 20, sectionW, 18);
-                header.font = [NSFont boldSystemFontOfSize:12.0];
-                header.textColor = [NSColor secondaryLabelColor];
-                [section addSubview:header];
-
+                NSView* grid = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, gridW, gridH)];
                 for (NSUInteger i = 0; i < items.count; i++) {
                     NSUInteger col = i % kColumns;
                     NSUInteger row = i / kColumns;
                     CGFloat x = col * (kItemW + kPadding);
-                    CGFloat y = sectionH - 24 - (row + 1) * kItemH - row * kPadding;
+                    CGFloat y = gridH - (row + 1) * kItemH - row * kPadding;
                     NSView* item = items[i];
                     [item setFrameOrigin:NSMakePoint(x, y)];
-                    [section addSubview:item];
+                    [grid addSubview:item];
                 }
-                return section;
+                return grid;
             };
 
-            NSView* screenSection = makeSection(@"Screens", screenItems);
-            NSView* windowSection = makeSection(@"Windows", windowItems);
+            NSView* windowsGrid = makeGrid(windowItems);
+            NSView* screensGrid = makeGrid(screenItems);
 
-            // Calculate total content size
-            CGFloat contentW = kColumns * kItemW + (kColumns - 1) * kPadding + 20;
-            CGFloat contentH = 0;
-            if (screenSection) contentH += screenSection.frame.size.height + kSectionPad;
-            if (windowSection) contentH += windowSection.frame.size.height + kSectionPad;
-
-            // Container view for all sections
-            NSView* container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, contentW, contentH)];
-            CGFloat yOff = contentH;
-            if (screenSection) {
-                yOff -= screenSection.frame.size.height;
-                [screenSection setFrameOrigin:NSMakePoint(10, yOff)];
-                [container addSubview:screenSection];
-                yOff -= kSectionPad;
-            }
-            if (windowSection) {
-                yOff -= windowSection.frame.size.height;
-                [windowSection setFrameOrigin:NSMakePoint(10, yOff)];
-                [container addSubview:windowSection];
-            }
-
-            // Wrap in scroll view
+            // Grid content dimensions
+            CGFloat gridContentW = kColumns * kItemW + (kColumns - 1) * kPadding + 20;
             CGFloat maxVisibleH = 420.0;
-            CGFloat visibleH = fmin(contentH, maxVisibleH);
-            NSScrollView* scrollView = [[NSScrollView alloc]
-                initWithFrame:NSMakeRect(0, 0, contentW + 20, visibleH)];
-            scrollView.hasVerticalScroller = (contentH > maxVisibleH);
-            scrollView.documentView = container;
-            scrollView.drawsBackground = NO;
+
+            // Windows scroll view
+            CGFloat wGridH = windowsGrid.frame.size.height;
+            CGFloat wVisibleH = fmin(wGridH, maxVisibleH);
+            NSScrollView* windowsScrollView = [[NSScrollView alloc]
+                initWithFrame:NSMakeRect(0, 0, gridContentW, fmax(wVisibleH, 100))];
+            windowsScrollView.hasVerticalScroller = (wGridH > maxVisibleH);
+            windowsScrollView.documentView = windowsGrid;
+            windowsScrollView.drawsBackground = NO;
+
+            // Screens scroll view
+            CGFloat sGridH = screensGrid.frame.size.height;
+            CGFloat sVisibleH = fmin(sGridH, maxVisibleH);
+            NSScrollView* screensScrollView = [[NSScrollView alloc]
+                initWithFrame:NSMakeRect(0, 0, gridContentW, fmax(sVisibleH, 100))];
+            screensScrollView.hasVerticalScroller = (sGridH > maxVisibleH);
+            screensScrollView.documentView = screensGrid;
+            screensScrollView.drawsBackground = NO;
+
+            // --- Build NSPanel ---
+            CGFloat panelW = fmax(gridContentW + 40, 680);
+            CGFloat gridAreaH = fmax(fmax(wVisibleH, sVisibleH), 200);
+            // Title(22) + subtitle(16) + gap(12) + tabs(30) + separator(3) + gap(12) + grid + gap(16) + toggle(24) + gap(16) + buttons(32) + gap(16)
+            CGFloat panelH = 22 + 16 + 12 + 30 + 3 + 12 + gridAreaH + 16 + 24 + 16 + 32 + 16;
+            CGFloat panelInset = 20.0;
+
+            NSPanel* panel = [[NSPanel alloc]
+                initWithContentRect:NSMakeRect(0, 0, panelW, panelH)
+                          styleMask:NSWindowStyleMaskTitled | NSWindowStyleMaskClosable
+                            backing:NSBackingStoreBuffered
+                              defer:NO];
+            panel.title = @"";
+            panel.floatingPanel = YES;
+            panel.becomesKeyOnlyIfNeeded = NO;
+            panel.level = NSModalPanelWindowLevel;
+            [panel center];
+
+            NSView* contentView = panel.contentView;
+            contentView.wantsLayer = YES;
+
+            // Picker helper (retains scroll views, handles actions)
+            MAIPickerHelper* helper = [[MAIPickerHelper alloc] init];
+            helper.windowsScrollView = windowsScrollView;
+            helper.screensScrollView = screensScrollView;
+            panel.delegate = helper;
+
+            // Keep helper alive for the duration of the modal
+            static MAIPickerHelper* s_activeHelper = nil;
+            s_activeHelper = helper;
+
+            // Current Y cursor (top-down layout)
+            CGFloat curY = panelH - panelInset;
+
+            // Title label
+            curY -= 20;
+            NSString* titleText = domain.length > 0
+                ? [NSString stringWithFormat:@"Elige qu\u00e9 quieres compartir con %@", domain]
+                : @"Elige qu\u00e9 quieres compartir";
+            NSTextField* titleLabel = [NSTextField labelWithString:titleText];
+            titleLabel.frame = NSMakeRect(panelInset, curY, panelW - 2 * panelInset, 20);
+            titleLabel.font = [NSFont boldSystemFontOfSize:14.0];
+            titleLabel.lineBreakMode = NSLineBreakByTruncatingTail;
+            [contentView addSubview:titleLabel];
+
+            // Subtitle label
+            curY -= 18;
+            NSTextField* subtitleLabel = [NSTextField labelWithString:
+                @"El sitio podr\u00e1 ver el contenido de tu pantalla"];
+            subtitleLabel.frame = NSMakeRect(panelInset, curY, panelW - 2 * panelInset, 16);
+            subtitleLabel.font = [NSFont systemFontOfSize:11.0];
+            subtitleLabel.textColor = [NSColor secondaryLabelColor];
+            [contentView addSubview:subtitleLabel];
+
+            // Tab bar (Chrome-style: text labels with blue underline)
+            curY -= 42;
+            CGFloat tabW = (panelW - 2 * panelInset) / 2.0;
+            CGFloat tabH = 28.0;
+
+            NSButton* tabWindows = [[NSButton alloc] initWithFrame:NSMakeRect(panelInset, curY, tabW, tabH)];
+            tabWindows.title = @"Ventana";
+            tabWindows.bordered = NO;
+            tabWindows.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium];
+            tabWindows.contentTintColor = [NSColor secondaryLabelColor];
+            [contentView addSubview:tabWindows];
+
+            NSButton* tabScreens = [[NSButton alloc] initWithFrame:NSMakeRect(panelInset + tabW, curY, tabW, tabH)];
+            tabScreens.title = @"Pantalla completa";
+            tabScreens.bordered = NO;
+            tabScreens.font = [NSFont systemFontOfSize:13.0 weight:NSFontWeightMedium];
+            tabScreens.contentTintColor = [NSColor systemBlueColor];
+            [contentView addSubview:tabScreens];
+
+            // Blue underline indicator (2px, under active tab)
+            NSView* tabIndicator = [[NSView alloc] initWithFrame:
+                NSMakeRect(panelInset + tabW, curY - 2, tabW, 2)];
+            tabIndicator.wantsLayer = YES;
+            tabIndicator.layer.backgroundColor = [NSColor systemBlueColor].CGColor;
+            [contentView addSubview:tabIndicator];
+
+            // Separator line
+            NSView* tabSeparator = [[NSView alloc] initWithFrame:
+                NSMakeRect(panelInset, curY - 3, panelW - 2 * panelInset, 1)];
+            tabSeparator.wantsLayer = YES;
+            tabSeparator.layer.backgroundColor = [[NSColor separatorColor] CGColor];
+            [contentView addSubview:tabSeparator];
+
+            // Tab click handlers
+            tabWindows.target = helper;
+            tabWindows.action = @selector(tabChanged:);
+            tabWindows.tag = 0;
+            tabScreens.target = helper;
+            tabScreens.action = @selector(tabChanged:);
+            tabScreens.tag = 1;
+
+            // Connect helper to tab UI elements
+            helper.tabIndicator = tabIndicator;
+            helper.tabWindows = tabWindows;
+            helper.tabScreens = tabScreens;
+
+            // Position scroll views in the grid area
+            curY -= (gridAreaH + 12);
+            CGFloat scrollX = (panelW - gridContentW) / 2.0;
+
+            windowsScrollView.frame = NSMakeRect(scrollX, curY, gridContentW, gridAreaH);
+            screensScrollView.frame = NSMakeRect(scrollX, curY, gridContentW, gridAreaH);
+            [contentView addSubview:windowsScrollView];
+            [contentView addSubview:screensScrollView];
+
+            // Default tab: "Pantalla completa" (index 1) → show screens, hide windows
+            windowsScrollView.hidden = YES;
+            screensScrollView.hidden = NO;
 
             // Selection state
-            __block NSInteger selectedIndex = 0;
+            __block NSInteger selectedIndex = -1;
 
             // Highlight helper
             void (^updateSelection)(NSInteger) = ^(NSInteger newIndex) {
-                // Clear old
-                NSArray<NSView*>* allSections = @[];
-                if (screenSection && windowSection)
-                    allSections = @[screenSection, windowSection];
-                else if (screenSection)
-                    allSections = @[screenSection];
-                else if (windowSection)
-                    allSections = @[windowSection];
-
-                for (NSView* sec in allSections) {
-                    for (NSView* sub in sec.subviews) {
+                // Update both grids
+                NSArray<NSView*>* allGrids = @[windowsGrid, screensGrid];
+                for (NSView* grid in allGrids) {
+                    for (NSView* sub in grid.subviews) {
                         NSNumber* subTag = [viewTagMap objectForKey:sub];
                         if (subTag && sub.wantsLayer) {
                             BOOL match = ([subTag integerValue] == newIndex);
@@ -1423,7 +1562,7 @@ static int CEF_CALLBACK on_jsdialog(
                                 ? [NSColor systemBlueColor].CGColor
                                 : [NSColor clearColor].CGColor;
                             sub.layer.backgroundColor = match
-                                ? [[NSColor systemBlueColor] colorWithAlphaComponent:0.1].CGColor
+                                ? [[NSColor systemBlueColor] colorWithAlphaComponent:0.06].CGColor
                                 : [NSColor clearColor].CGColor;
                         }
                     }
@@ -1431,23 +1570,74 @@ static int CEF_CALLBACK on_jsdialog(
                 selectedIndex = newIndex;
             };
 
-            // Select first item by default
-            updateSelection(0);
+            // Select first screen by default (since screens tab is default)
+            if (displays.count > 0) {
+                updateSelection(0);
+            }
 
-            // Install click gesture on each item
+            // All items for click detection
             NSMutableArray<NSView*>* allItems = [NSMutableArray array];
             [allItems addObjectsFromArray:screenItems];
             [allItems addObjectsFromArray:windowItems];
 
-            // Use a local event monitor for clicks inside the scroll view
+            // Audio toggle with speaker icon
+            curY -= 36;
+            NSImageView* speakerIcon = [[NSImageView alloc] initWithFrame:NSMakeRect(panelInset, curY, 20, 20)];
+            if (@available(macOS 11.0, *)) {
+                speakerIcon.image = [NSImage imageWithSystemSymbolName:@"speaker.wave.2" accessibilityDescription:@"Audio"];
+                speakerIcon.contentTintColor = [NSColor secondaryLabelColor];
+            }
+            [contentView addSubview:speakerIcon];
+
+            NSButton* audioToggle = [NSButton checkboxWithTitle:@"Compartir tambi\u00e9n el audio del sistema"
+                                                         target:nil action:nil];
+            audioToggle.frame = NSMakeRect(panelInset + 26, curY, panelW - 2 * panelInset - 26, 20);
+            audioToggle.font = [NSFont systemFontOfSize:12.0];
+            audioToggle.state = NSControlStateValueOff;
+            [contentView addSubview:audioToggle];
+
+            // Buttons row
+            curY -= 48;
+            CGFloat btnW = 90.0;
+            CGFloat btnH = 32.0;
+            CGFloat btnSpacing = 10.0;
+
+            // Share button (red, right-aligned)
+            NSButton* shareBtn = [[NSButton alloc] initWithFrame:
+                NSMakeRect(panelW - panelInset - btnW, curY, btnW, btnH)];
+            shareBtn.title = @"Compartir";
+            shareBtn.bezelStyle = NSBezelStyleRounded;
+            shareBtn.target = helper;
+            shareBtn.action = @selector(shareClicked:);
+            shareBtn.keyEquivalent = @"\r";
+            shareBtn.wantsLayer = YES;
+            shareBtn.bezelColor = [NSColor systemBlueColor];
+            [contentView addSubview:shareBtn];
+
+            // Cancel button (left of Share)
+            NSButton* cancelBtn = [[NSButton alloc] initWithFrame:
+                NSMakeRect(panelW - panelInset - 2 * btnW - btnSpacing, curY, btnW, btnH)];
+            cancelBtn.title = @"Cancelar";
+            cancelBtn.bezelStyle = NSBezelStyleRounded;
+            cancelBtn.target = helper;
+            cancelBtn.action = @selector(cancelClicked:);
+            cancelBtn.keyEquivalent = @"\033"; // Escape
+            [contentView addSubview:cancelBtn];
+
+            // Click monitor for item selection (checks visible scroll view)
             __block id clickMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown
                 handler:^NSEvent*(NSEvent* event) {
-                    NSPoint loc = [scrollView convertPoint:[event locationInWindow] fromView:nil];
-                    if (!NSPointInRect(loc, scrollView.bounds)) return event;
+                    // Determine which scroll view is visible
+                    NSScrollView* activeScroll = windowsScrollView.hidden ? screensScrollView : windowsScrollView;
+                    NSView* activeGrid = (NSView*)activeScroll.documentView;
 
-                    NSPoint docLoc = [container convertPoint:[event locationInWindow] fromView:nil];
+                    NSPoint loc = [activeScroll convertPoint:[event locationInWindow] fromView:nil];
+                    if (!NSPointInRect(loc, activeScroll.bounds)) return event;
+
+                    NSPoint docLoc = [activeGrid convertPoint:[event locationInWindow] fromView:nil];
                     for (NSView* item in allItems) {
-                        NSPoint itemLoc = [item convertPoint:docLoc fromView:container];
+                        if (item.superview != activeGrid) continue;
+                        NSPoint itemLoc = [item convertPoint:docLoc fromView:activeGrid];
                         if (NSPointInRect(itemLoc, item.bounds)) {
                             NSNumber* itemTag = [viewTagMap objectForKey:item];
                             if (itemTag) updateSelection([itemTag integerValue]);
@@ -1457,22 +1647,16 @@ static int CEF_CALLBACK on_jsdialog(
                     return event;
                 }];
 
-            // Show alert
-            NSAlert* alert = [[NSAlert alloc] init];
-            alert.messageText = @"Share your screen";
-            alert.informativeText = @"Choose what to share:";
-            [alert addButtonWithTitle:@"Share"];
-            [alert addButtonWithTitle:@"Cancel"];
-            alert.accessoryView = scrollView;
-            alert.window.minSize = NSMakeSize(contentW + 60, visibleH + 160);
+            // Run modal
+            NSModalResponse response = [NSApp runModalForWindow:panel];
 
-            NSModalResponse response = [alert runModal];
-
-            // Remove click monitor
+            // Cleanup
             [NSEvent removeMonitor:clickMonitor];
             clickMonitor = nil;
+            [panel orderOut:nil];
+            s_activeHelper = nil;
 
-            if (response == NSAlertFirstButtonReturn) {
+            if (response == NSModalResponseOK && selectedIndex >= 0) {
                 NSString* type = sourceTypes[selectedIndex];
 
                 if ([type hasPrefix:@"S:"]) {
@@ -1480,7 +1664,7 @@ static int CEF_CALLBACK on_jsdialog(
                     SCDisplay* selectedDisplay = g_enumeratedDisplays[dispIdx];
                     NSString* sourceId = [NSString stringWithFormat:@"screen:%u:0",
                                           selectedDisplay.displayID];
-                    cef_log_to_file("Screen picker: User selected display %u (%s) → %s",
+                    cef_log_to_file("Screen picker: User selected display %u (%s) -> %s",
                                     selectedDisplay.displayID,
                                     [getDisplayName(selectedDisplay, dispIdx) UTF8String],
                                     [sourceId UTF8String]);
@@ -1493,7 +1677,7 @@ static int CEF_CALLBACK on_jsdialog(
                     SCWindow* selectedWindow = g_enumeratedWindows[winIdx];
                     NSString* sourceId = [NSString stringWithFormat:@"window:%u:0",
                                           selectedWindow.windowID];
-                    cef_log_to_file("Screen picker: User selected window '%s' → %s",
+                    cef_log_to_file("Screen picker: User selected window '%s' -> %s",
                                     [selectedWindow.title UTF8String], [sourceId UTF8String]);
                     startWindowCapture(selectedWindow);
                     cef_string_t result = cef_string_from_nsstring(sourceId);
