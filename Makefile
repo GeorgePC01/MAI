@@ -81,29 +81,46 @@ bundle: build-debug helper ## Crea el .app bundle con CEF
 		create_helper "$(HELPER_NAME) (Plugin)" "com.mai.browser.helper.plugin"; \
 		create_helper "$(HELPER_NAME) (Renderer)" "com.mai.browser.helper.renderer"'
 	@echo "✅ 5 helper bundles creados"
-	@# ── Strip symbols + remove stray files ──
+	@# ── Strip symbols + remove stray files + xattrs ──
 	@echo "🔒 Stripping symbols..."
 	@strip -x /tmp/_mai_sign/$(BUNDLE)/Contents/MacOS/$(APP_NAME) 2>/dev/null || true
 	@find /tmp/_mai_sign/$(BUNDLE) -name '*.md' -not -path '*/Resources/*' -delete 2>/dev/null || true
 	@find /tmp/_mai_sign/$(BUNDLE) -name '.DS_Store' -delete 2>/dev/null || true
 	@find /tmp/_mai_sign/$(BUNDLE) -name '._*' -delete 2>/dev/null || true
+	@# ── Clean xattrs that break codesign on macOS 26 ──
+	@echo "🧹 Limpiando xattrs (provenance, FinderInfo)..."
+	@xattr -cr /tmp/_mai_sign/$(BUNDLE) 2>/dev/null || true
 	@# ── Sign ALL components with hardened runtime (inside-out for macOS 26) ──
-	@echo "🔐 Firmando con hardened runtime (deep)..."
+	@echo "🔐 Firmando con hardened runtime (inside-out)..."
 	@for helper in /tmp/_mai_sign/$(BUNDLE)/Contents/Frameworks/*.app; do \
 		codesign --force --sign - --options runtime "$$helper" 2>/dev/null || true; \
 	done
 	@codesign --force --sign - --options runtime "/tmp/_mai_sign/$(BUNDLE)/Contents/Frameworks/Chromium Embedded Framework.framework" 2>/dev/null || true
 	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_sign/$(BUNDLE)/Contents/MacOS/$(APP_NAME) 2>/dev/null || true
 	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_sign/$(BUNDLE) 2>/dev/null || echo "⚠️  Firma sin entitlements"
-	@codesign --verify --deep --strict /tmp/_mai_sign/$(BUNDLE) 2>/dev/null && echo "✅ Firma verificada" || echo "⚠️  Firma no verificada"
-	@# ── Move signed bundle to project directory ──
+	@codesign --verify --deep --strict /tmp/_mai_sign/$(BUNDLE) 2>/dev/null && echo "✅ Firma verificada en /tmp" || echo "⚠️  Firma no verificada en /tmp"
+	@# ── Copy bundle to project directory (reference copy — provenance xattr will invalidate signature here) ──
 	@ditto --norsrc /tmp/_mai_sign/$(BUNDLE) $(BUNDLE)
 	@rm -rf /tmp/_mai_sign
-	@echo "✅ Bundle creado: $(BUNDLE) (con CEF + 5 helpers, firmado)"
+	@echo "✅ Bundle creado: $(BUNDLE)"
+	@echo "   ⚠️  macOS 26: la firma en ~/Documents se invalida por com.apple.provenance"
+	@echo "   ✅ 'make app' ejecuta copia firmada desde /tmp (sin provenance)"
 
 app: bundle ## Compila y ejecuta como .app (RECOMENDADO)
-	@echo "🚀 Ejecutando $(BUNDLE)..."
-	@open $(BUNDLE)
+	@echo "🚀 Preparando ejecución (copia a /tmp — evita macOS 26 provenance xattr)..."
+	@rm -rf /tmp/_mai_run/$(BUNDLE)
+	@mkdir -p /tmp/_mai_run
+	@ditto --norsrc $(BUNDLE) /tmp/_mai_run/$(BUNDLE)
+	@xattr -cr /tmp/_mai_run/$(BUNDLE) 2>/dev/null || true
+	@for helper in /tmp/_mai_run/$(BUNDLE)/Contents/Frameworks/*.app; do \
+		codesign --force --sign - --options runtime "$$helper" 2>/dev/null || true; \
+	done
+	@codesign --force --sign - --options runtime "/tmp/_mai_run/$(BUNDLE)/Contents/Frameworks/Chromium Embedded Framework.framework" 2>/dev/null || true
+	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_run/$(BUNDLE)/Contents/MacOS/$(APP_NAME) 2>/dev/null || true
+	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_run/$(BUNDLE) 2>/dev/null || true
+	@codesign --verify --deep --strict /tmp/_mai_run/$(BUNDLE) 2>/dev/null && echo "✅ Firma verificada en /tmp" || echo "⚠️  Firma no verificada"
+	@echo "🚀 Ejecutando $(BUNDLE) desde /tmp/_mai_run/..."
+	@open /tmp/_mai_run/$(BUNDLE)
 
 run: app ## Alias para 'app' - ejecuta el navegador correctamente
 	@true

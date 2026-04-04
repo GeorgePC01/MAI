@@ -338,20 +338,22 @@ class EasyListManager: ObservableObject {
         if p.hasPrefix("||") {
             p = String(p.dropFirst(2))
             let escaped = escapeForRegex(p)
-            // Match domain and subdomains
-            return "^[^:]+:(//)?([^/]*\\.)?" + escaped
+            let result = "^[^:]+:(//)?([^/]*\\.)?" + escaped
+            return isValidRegex(result) ? result : nil
         }
 
         // Start anchor: |http
         if p.hasPrefix("|") {
             p = String(p.dropFirst())
-            return "^" + escapeForRegex(p)
+            let result = "^" + escapeForRegex(p)
+            return isValidRegex(result) ? result : nil
         }
 
         // End anchor: .js|
         if p.hasSuffix("|") {
             p = String(p.dropLast())
-            return escapeForRegex(p) + "$"
+            let result = escapeForRegex(p) + "$"
+            return isValidRegex(result) ? result : nil
         }
 
         let escaped = escapeForRegex(p)
@@ -361,7 +363,17 @@ class EasyListManager: ObservableObject {
             return nil
         }
 
-        return escaped
+        return isValidRegex(escaped) ? escaped : nil
+    }
+
+    /// Validate regex is acceptable to WebKit's content rule list engine
+    private func isValidRegex(_ pattern: String) -> Bool {
+        do {
+            _ = try NSRegularExpression(pattern: pattern)
+            return true
+        } catch {
+            return false
+        }
     }
 
     /// Escape regex special characters, convert Adblock Plus wildcards
