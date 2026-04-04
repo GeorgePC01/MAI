@@ -34,13 +34,20 @@
 
     <!-- Hardened Runtime: NO incluir estas excepciones (anti-RE):
          - com.apple.security.cs.allow-dyld-environment-variables  (bloquea DYLD_INSERT_LIBRARIES)
-         - com.apple.security.cs.disable-library-validation        (bloquea dylib injection no firmadas)
          - com.apple.security.cs.allow-unsigned-executable-memory   (bloquea JIT no autorizado)
          - com.apple.security.get-task-allow                        (bloquea task_for_pid debugging)
     -->
 
     <!-- Permitir JIT solo para WebKit/CEF (requerido para JavaScript engine) -->
     <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+
+    <!-- Permitir cargar libraries con firma diferente (requerido para CEF ad-hoc signing).
+         macOS 26 hardened runtime rechaza dlopen de Chromium Embedded Framework porque
+         su firma ad-hoc tiene identidad diferente a la del binario principal.
+         Sin Apple Developer ID, no hay forma de firmar ambos con el mismo Team ID.
+         NOTA: Cuando se tenga Developer ID, remover esto y firmar todo con el mismo identity. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
     <true/>
 </dict>
 </plist>

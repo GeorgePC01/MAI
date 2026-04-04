@@ -93,7 +93,7 @@ bundle: build-debug helper ## Crea el .app bundle con CEF
 	@# ── Sign ALL components with hardened runtime (inside-out for macOS 26) ──
 	@echo "🔐 Firmando con hardened runtime (inside-out)..."
 	@for helper in /tmp/_mai_sign/$(BUNDLE)/Contents/Frameworks/*.app; do \
-		codesign --force --sign - --options runtime "$$helper" 2>/dev/null || true; \
+		codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements "$$helper" 2>/dev/null || true; \
 	done
 	@codesign --force --sign - --options runtime "/tmp/_mai_sign/$(BUNDLE)/Contents/Frameworks/Chromium Embedded Framework.framework" 2>/dev/null || true
 	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_sign/$(BUNDLE)/Contents/MacOS/$(APP_NAME) 2>/dev/null || true
@@ -113,7 +113,7 @@ app: bundle ## Compila y ejecuta como .app (RECOMENDADO)
 	@ditto --norsrc $(BUNDLE) /tmp/_mai_run/$(BUNDLE)
 	@xattr -cr /tmp/_mai_run/$(BUNDLE) 2>/dev/null || true
 	@for helper in /tmp/_mai_run/$(BUNDLE)/Contents/Frameworks/*.app; do \
-		codesign --force --sign - --options runtime "$$helper" 2>/dev/null || true; \
+		codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements "$$helper" 2>/dev/null || true; \
 	done
 	@codesign --force --sign - --options runtime "/tmp/_mai_run/$(BUNDLE)/Contents/Frameworks/Chromium Embedded Framework.framework" 2>/dev/null || true
 	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_run/$(BUNDLE)/Contents/MacOS/$(APP_NAME) 2>/dev/null || true
