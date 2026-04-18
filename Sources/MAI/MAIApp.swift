@@ -59,6 +59,22 @@ class WindowManager {
         }
     }
 
+    /// Resuelve el BrowserState asociado a una NSWindow específica
+    func browserState(for window: NSWindow) -> BrowserState? {
+        return windows.first(where: { $0.window === window })?.state
+    }
+
+    /// BrowserState de la ventana con foco (fallback al primero registrado)
+    func focusedBrowserState() -> BrowserState? {
+        if let key = NSApp.keyWindow, let state = browserState(for: key) {
+            return state
+        }
+        if let main = NSApp.mainWindow, let state = browserState(for: main) {
+            return state
+        }
+        return windows.first?.state
+    }
+
     /// Busca el BrowserState de otra ventana cuyo tab bar contiene el punto en pantalla
     func browserState(at screenPoint: NSPoint, excluding: BrowserState) -> BrowserState? {
         for entry in windows {
@@ -452,48 +468,56 @@ struct MAIApp: App {
 
             CommandMenu("Desarrollo") {
                 Button("DevTools") {
-                    browserState.showDevTools.toggle()
+                    let state = WindowManager.shared.focusedBrowserState() ?? browserState
+                    state.showDevTools.toggle()
                 }
                 .keyboardShortcut("i", modifiers: [.command, .option])
 
                 Button("Consola JavaScript") {
+                    let state = WindowManager.shared.focusedBrowserState() ?? browserState
                     DevToolsState.shared.selectedTab = .console
-                    browserState.showDevTools = true
+                    state.showDevTools = true
                 }
                 .keyboardShortcut("j", modifiers: [.command, .option])
 
                 Button("Inspeccionar Elementos") {
+                    let state = WindowManager.shared.focusedBrowserState() ?? browserState
                     DevToolsState.shared.selectedTab = .elements
-                    browserState.showDevTools = true
+                    state.showDevTools = true
                 }
 
                 Button("Monitor de Red") {
+                    let state = WindowManager.shared.focusedBrowserState() ?? browserState
                     DevToolsState.shared.selectedTab = .network
-                    browserState.showDevTools = true
+                    state.showDevTools = true
                 }
 
                 Divider()
 
                 Button("CSS Debug") {
+                    let state = WindowManager.shared.focusedBrowserState() ?? browserState
                     DevToolsState.shared.selectedTab = .cssDebug
-                    browserState.showDevTools = true
+                    state.showDevTools = true
                 }
 
                 Button("Vista 3D del DOM") {
+                    let state = WindowManager.shared.focusedBrowserState() ?? browserState
                     DevToolsState.shared.selectedTab = .dom3d
-                    browserState.showDevTools = true
+                    state.showDevTools = true
                 }
 
                 Button("Auditoría de Accesibilidad") {
+                    let state = WindowManager.shared.focusedBrowserState() ?? browserState
                     DevToolsState.shared.selectedTab = .accessibility
-                    browserState.showDevTools = true
+                    state.showDevTools = true
                 }
 
                 Divider()
 
                 Button("Ver Código Fuente") {
+                    let state = WindowManager.shared.focusedBrowserState() ?? browserState
                     DevToolsState.shared.selectedTab = .sources
-                    browserState.showDevTools = true
+                    state.showDevTools = true
                 }
                 .keyboardShortcut("u", modifiers: [.command, .option])
             }

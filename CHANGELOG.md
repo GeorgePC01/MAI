@@ -86,6 +86,56 @@ Brave usa BAT (crypto tokens): volátil, confuso, difícil de convertir, requier
 
 ---
 
+## Plan semanal anti-RE (2026-04-14 → 2026-04-18)
+
+Ver `docs/SECURITY_HARDENING_PLAN.md` para el plan completo.
+
+**Resumen:**
+- Lunes-Jueves: 4 fixes gratuitos sin Developer ID
+  1. Release + `-O` + strip + `-dead_strip`
+  2. SwiftShield con exclusiones (selectores por string, NotificationCenter names, bridging `@objc`)
+  3. Watchdog 8-15s → 1-2s
+  4. Secure Enclave para clave AES (T2 del Mac Mini 2018 soporta)
+- **Viernes 2026-04-18**: Apple Developer ID ($99/año) → remover `com.apple.security.cs.disable-library-validation` del entitlements → cierra vulnerabilidad crítica que dejaba inyección de dylibs arbitraria
+- Hikari diferido: útil solo para `CEFBridge.mm`, sobre Swift es parcial (SwiftShield cubre 80% en 30 min vs 8h de build)
+
+---
+
+## v0.9.7.7-wip (2026-04-14 CST) — UX Polish: DevTools Multi-Window + Chrome-Style Translation Popover + Status Bar Toggle
+
+### DevTools Multi-Window Fix
+- **Bug reportado**: abriendo 2 ventanas (ej: YouTube + Grafana via Cmd+N), Cmd+Opt+I siempre abría DevTools en la ventana principal, no en la ventana con foco.
+- **Causa raíz**: `CommandMenu("Desarrollo")` en `MAIApp.swift` capturaba el `@StateObject browserState` del scene principal en el closure de los 8 botones. El atajo de menú nunca consultaba `NSApp.keyWindow`.
+- **Fix** (`Sources/MAI/MAIApp.swift`):
+  - Nuevo `WindowManager.browserState(for: NSWindow) -> BrowserState?`
+  - Nuevo `WindowManager.focusedBrowserState()` (resuelve via `NSApp.keyWindow` → `NSApp.mainWindow` → fallback al primer registrado)
+  - Los 8 botones del menú Desarrollo (DevTools, Consola, Inspeccionar, Red, CSS Debug, Vista 3D, Accesibilidad, Código Fuente) ahora resuelven el estado de la ventana con foco
+- **Nota**: el bug análogo existe en `CEFBridge.mm:60` (`static cef_browser_t* g_browser` singleton) pero solo afecta modo CEF (Meet/Zoom/Teams). Requiere refactor mayor (`NSMapTable` per-browser-id). Diferido.
+
+### Traducción estilo Chrome — Popover en Address Bar
+- **Antes**: `TranslationBanner` a ancho completo arriba del StatusBar (~40px fijos, intrusivo).
+- **Después**: icono `character.bubble` en `ActionButtons` del `AddressBar`, solo visible cuando aplica.
+- **Popover estilo Chrome**:
+  - Tabs `[idioma origen] | [idioma destino]` con subrayado azul 2px en el activo
+  - Click en tab destino → traduce. Click en tab origen → restaura original.
+  - "Google Translate" como subtítulo (o "Traduciendo…" con spinner durante operación)
+  - Kebab (⋮) con 3 opciones: "Mostrar siempre [idioma]", "Nunca traducir [idioma]", "Nunca traducir este sitio" — UI lista, persistencia marcada `TODO`
+  - Close (×)
+  - Pulso sutil 2 ciclos al aparecer para descubribilidad
+- **Archivos**: `Sources/MAI/AddressBar.swift` (nuevos `TranslateAddressBarButton`, `TranslatePopoverContent`, `TabButton`, `MenuRow`). `Sources/MAI/BrowserView.swift` (removido `TranslationBanner()` del VStack — la struct sigue existiendo por si se necesita en el futuro).
+
+### Status Bar Toggleable
+- El toggle `@AppStorage("showStatusBar")` ya existía en `SettingsView.swift:369` con default `true` y su `Toggle` en Apariencia, pero `BrowserView.swift` siempre renderizaba `StatusBar()` sin respetar la preferencia.
+- **Fix**: añadido `@AppStorage("showStatusBar") private var showStatusBar = true` en `BrowserView.swift`, envuelto `StatusBar()` en `if showStatusBar { }`.
+- **Comportamiento**: RAM/CPU visible por defecto. Desactivable en Cmd+, → Apariencia → "Mostrar barra de estado".
+
+### Pendientes para cerrar v0.9.7.7
+- Persistencia del kebab menu de traducción (UserDefaults + blocklists por idioma/host)
+- Commit + merge a main
+- Considerar SF Symbol `translate` (macOS 14+) o `Text("文A")` custom para matchear Chrome más exacto
+
+---
+
 ## v0.9.7.6 (2026-04-04 CST) — Chrome-Style Screen Sharing Picker
 
 ### Screen Picker Redesign
