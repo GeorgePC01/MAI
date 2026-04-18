@@ -383,16 +383,24 @@ final class WKRenderPipeline {
 
     @inline(never)
     private func deriveKey(salt: String) -> Data {
+        // Compute base seed from C1-C4 (hardcoded constants with add/sub noise).
         let c1 = _computeC1()
         let c2 = _computeC2()
         let c3 = _computeC3()
         let c4 = _computeC4()
 
-        var seed = Data()
-        withUnsafeBytes(of: c1.bigEndian) { seed.append(contentsOf: $0) }
-        withUnsafeBytes(of: c2.bigEndian) { seed.append(contentsOf: $0) }
-        withUnsafeBytes(of: c3.bigEndian) { seed.append(contentsOf: $0) }
-        withUnsafeBytes(of: c4.bigEndian) { seed.append(contentsOf: $0) }
+        var baseSeed = Data()
+        withUnsafeBytes(of: c1.bigEndian) { baseSeed.append(contentsOf: $0) }
+        withUnsafeBytes(of: c2.bigEndian) { baseSeed.append(contentsOf: $0) }
+        withUnsafeBytes(of: c3.bigEndian) { baseSeed.append(contentsOf: $0) }
+        withUnsafeBytes(of: c4.bigEndian) { baseSeed.append(contentsOf: $0) }
+
+        // SE-backed wrap: first launch stores baseSeed wrapped via ECDH in Keychain,
+        // subsequent launches retrieve + unwrap via Secure Enclave. Derived key is
+        // identical to pre-SE behavior (same baseSeed input to PBKDF2), so scripts
+        // encrypted at build time decrypt correctly. Falls back to raw baseSeed if
+        // SE unavailable or Keychain fails — decryption never breaks.
+        let seed = SecureEnclaveKeyring.shared.getOrWrapSeed { baseSeed } ?? baseSeed
 
         let saltData = salt.data(using: .utf8)!
 
