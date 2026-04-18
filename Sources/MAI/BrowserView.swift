@@ -5,6 +5,7 @@ import WebKit
 /// Vista principal del navegador
 struct BrowserView: View {
     @EnvironmentObject var browserState: BrowserState
+    @AppStorage("showStatusBar") private var showStatusBar = true
 
     var body: some View {
         VStack(spacing: 0) {
@@ -91,14 +92,13 @@ struct BrowserView: View {
                 }
             }
 
-            // Banner de traducción
-            TranslationBanner()
-
             // Banner de suspensión (si hay tab pendiente)
             SuspensionBanner()
 
-            // Barra de estado
-            StatusBar()
+            // Barra de estado (configurable en Ajustes → Apariencia)
+            if showStatusBar {
+                StatusBar()
+            }
         }
         .background(browserState.isIncognito
                     ? Color(red: 0.10, green: 0.10, blue: 0.12)

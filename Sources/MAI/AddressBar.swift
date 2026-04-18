@@ -625,6 +625,7 @@ struct CertificateInfoPopover: View {
 struct ActionButtons: View {
     @EnvironmentObject var browserState: BrowserState
     @ObservedObject private var bookmarksManager = BookmarksManager.shared
+    @ObservedObject private var translation = TranslationManager.shared
 
     private var isCurrentPageBookmarked: Bool {
         guard let url = browserState.currentTab?.url, !url.isEmpty, url != "about:blank" else {
@@ -633,8 +634,17 @@ struct ActionButtons: View {
         return bookmarksManager.isBookmarked(url: url)
     }
 
+    private var showTranslateIcon: Bool {
+        (translation.showTranslationBanner && !translation.detectedLanguage.isEmpty) || translation.currentTabTranslated
+    }
+
     var body: some View {
         HStack(spacing: 4) {
+            // Icono de traducción estilo Chrome (solo cuando aplica)
+            if showTranslateIcon {
+                TranslateAddressBarButton()
+            }
+
             // Botón de favoritos (estrella)
             Button(action: { toggleBookmark() }) {
                 Image(systemName: isCurrentPageBookmarked ? "star.fill" : "star")
@@ -693,6 +703,227 @@ struct ActionButtons: View {
     private func openSettingsWindow() {
         // Método compatible con macOS 13+
         NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    }
+}
+
+// MARK: - Botón de traducción estilo Chrome en Address Bar
+
+/// Icono de traducción que aparece a la derecha del URL cuando la página está en otro idioma.
+/// Click → popover estilo Chrome con tabs para idioma original/destino.
+struct TranslateAddressBarButton: View {
+    @EnvironmentObject var browserState: BrowserState
+    @ObservedObject private var translation = TranslationManager.shared
+    @State private var showPopover = false
+    @State private var pulse = false
+
+    var body: some View {
+        Button(action: { showPopover.toggle() }) {
+            ZStack {
+                // Fondo suave cuando está "activo" (página traducida)
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(translation.currentTabTranslated ? Color.blue.opacity(0.12) : Color.clear)
+                    .frame(width: 28, height: 24)
+
+                Image(systemName: "character.bubble")
+                    .font(.system(size: 14, weight: .regular))
+                    .foregroundColor(translation.currentTabTranslated ? .blue : .primary)
+                    .scaleEffect(pulse ? 1.15 : 1.0)
+            }
+        }
+        .buttonStyle(NavigationButtonStyle())
+        .help(translation.currentTabTranslated
+              ? "Página traducida — click para ver opciones"
+              : "Esta página está en \(TranslationManager.languageName(for: translation.detectedLanguage))")
+        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
+            TranslatePopoverContent(showPopover: $showPopover)
+                .environmentObject(browserState)
+        }
+        .onAppear {
+            // Pulso sutil la primera vez que aparece el icono (descubribilidad)
+            if translation.showTranslationBanner && !translation.currentTabTranslated {
+                withAnimation(.easeInOut(duration: 0.4).repeatCount(2, autoreverses: true)) {
+                    pulse = true
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) {
+                    pulse = false
+                }
+            }
+        }
+    }
+}
+
+/// Contenido del popover: tabs "origen | destino" + "Google Translate" + kebab + close
+struct TranslatePopoverContent: View {
+    @EnvironmentObject var browserState: BrowserState
+    @ObservedObject private var translation = TranslationManager.shared
+    @Binding var showPopover: Bool
+    @State private var hoverKebab = false
+    @State private var hoverClose = false
+    @State private var showKebabMenu = false
+
+    private var sourceCode: String { translation.detectedLanguage }
+    private var targetCode: String { translation.targetLanguage }
+
+    /// true = mostrando traducida (target activo), false = mostrando original (source activo)
+    private var showingTranslated: Bool { translation.currentTabTranslated }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header: tabs + kebab + close
+            HStack(spacing: 0) {
+                TabButton(
+                    title: TranslationManager.languageName(for: sourceCode).lowercased(),
+                    isActive: !showingTranslated,
+                    action: { showOriginal() }
+                )
+
+                TabButton(
+                    title: TranslationManager.languageName(for: targetCode).lowercased(),
+                    isActive: showingTranslated,
+                    action: { translateNow() }
+                )
+
+                Spacer()
+
+                // Kebab menu
+                Button(action: { showKebabMenu.toggle() }) {
+                    Image(systemName: "ellipsis")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(hoverKebab ? Color.gray.opacity(0.15) : Color.clear)
+                        .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .onHover { hoverKebab = $0 }
+                .popover(isPresented: $showKebabMenu, arrowEdge: .bottom) {
+                    kebabMenu
+                }
+
+                // Close
+                Button(action: { showPopover = false }) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                        .frame(width: 24, height: 24)
+                        .background(hoverClose ? Color.gray.opacity(0.15) : Color.clear)
+                        .cornerRadius(4)
+                }
+                .buttonStyle(.plain)
+                .onHover { hoverClose = $0 }
+            }
+            .padding(.horizontal, 8)
+            .padding(.top, 8)
+
+            // Progreso o subtítulo
+            HStack(spacing: 6) {
+                if translation.isTranslating {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 12, height: 12)
+                    Text("Traduciendo…")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("Google Translate")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.top, 4)
+            .padding(.bottom, 12)
+        }
+        .frame(width: 280)
+    }
+
+    private var kebabMenu: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MenuRow(text: "Mostrar siempre en \(TranslationManager.languageName(for: targetCode))") {
+                // TODO: persistir preferencia "always translate this language"
+                showKebabMenu = false
+            }
+            MenuRow(text: "Nunca traducir \(TranslationManager.languageName(for: sourceCode))") {
+                // TODO: persistir blocklist por idioma
+                showKebabMenu = false
+                showPopover = false
+            }
+            MenuRow(text: "Nunca traducir este sitio") {
+                // TODO: persistir blocklist por host
+                showKebabMenu = false
+                showPopover = false
+            }
+        }
+        .padding(.vertical, 4)
+        .frame(width: 240)
+    }
+
+    private func translateNow() {
+        guard !showingTranslated else { return }
+        guard let webView = browserState.currentTab?.webView else { return }
+        let source = sourceCode
+        Task {
+            await translation.translatePage(webView: webView, from: source)
+        }
+    }
+
+    private func showOriginal() {
+        guard showingTranslated else { return }
+        guard let webView = browserState.currentTab?.webView else { return }
+        Task {
+            await translation.restoreOriginal(webView: webView)
+        }
+    }
+}
+
+private struct TabButton: View {
+    let title: String
+    let isActive: Bool
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(spacing: 4) {
+                Text(title)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    .foregroundColor(isActive ? .blue : .secondary)
+                    .padding(.horizontal, 14)
+                    .padding(.top, 8)
+                    .padding(.bottom, 6)
+
+                Rectangle()
+                    .fill(isActive ? Color.blue : Color.clear)
+                    .frame(height: 2)
+            }
+            .contentShape(Rectangle())
+            .background(hover && !isActive ? Color.gray.opacity(0.08) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+    }
+}
+
+private struct MenuRow: View {
+    let text: String
+    let action: () -> Void
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Text(text)
+                    .font(.system(size: 12))
+                    .foregroundColor(.primary)
+                Spacer()
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+            .background(hover ? Color.gray.opacity(0.12) : Color.clear)
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
     }
 }
 
