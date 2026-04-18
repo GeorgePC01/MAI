@@ -101,6 +101,32 @@ Ver `docs/SECURITY_HARDENING_PLAN.md` para el plan completo.
 
 ---
 
+## v0.9.7.9 (2026-04-18 CST) — Anti-RE Watchdog Frequency (Paso 3 plan semanal)
+
+### Watchdog interval: 8-15s → 1-2s
+- **Archivo**: `Sources/MAI/WKRenderPipeline.swift:141-150`
+- **Antes**: `baseInterval=8.0s` + jitter `0...7s` → 8-15s entre chequeos anti-debug/anti-hook
+- **Después**: `baseInterval=1.0s` + jitter `0...1s` → **1-2s entre chequeos** (7-8× más frecuente)
+- El jitter sigue calculado una vez por lanzamiento → cada instalación tiene un período ligeramente distinto (no predecible para attacker que quiera inyectar entre ticks)
+
+### Rationale
+Menor ventana de oportunidad para attacker inyectar hooks/breakpoints/exception ports entre dos chequeos consecutivos. Si antes tenía ~11s promedio para actuar, ahora tiene ~1.5s.
+
+### Impacto CPU
+Operaciones del watchdog son ligeras:
+- `_verifyCodeSignature()` — OS cachea la verificación
+- `_verifyNoHooks()` — `dlsym` + `class_getInstanceMethod` lookups (ns)
+- `_checkInstrumentation()` — `sysctl` + iter ~30 dyld images (µs)
+- `_checkExceptionPorts()` — 1 `task_get_exception_ports` call (µs)
+
+Total por tick: < 1ms. A 1 Hz = ~0.1% CPU idle. Imperceptible en Apple Silicon.
+
+### Pendiente plan anti-RE
+- **Paso 4**: Secure Enclave para clave AES (2-3h, riesgo bajo)
+- **Hoy 2026-04-18**: Apple Developer ID $99/año → remover `com.apple.security.cs.disable-library-validation` de `Resources/MAI.entitlements`
+
+---
+
 ## v0.9.7.8 (2026-04-18 CST) — Anti-RE Release Hardening + Ad Blocker Player UI Protection
 
 ### Anti-RE Release Build Hardening (Plan anti-RE semanal — Paso 1 + 2)

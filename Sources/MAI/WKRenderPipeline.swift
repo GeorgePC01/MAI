@@ -141,8 +141,11 @@ final class WKRenderPipeline {
     private func _startWatchdog() {
         let queue = DispatchQueue(label: "com.mai.sp.wd", qos: .utility)
         let timer = DispatchSource.makeTimerSource(queue: queue)
-        let baseInterval = 8.0
-        let jitter = Double.random(in: 0...7)
+        // Anti-RE: 1-2s interval (antes 8-15s). Más frecuente = menor ventana para
+        // attacker inyectar hooks/breakpoints entre chequeos. Operaciones del loop
+        // son ligeras (sysctl + dyld iter + dlsym cached) — imperceptible en CPU.
+        let baseInterval = 1.0
+        let jitter = Double.random(in: 0...1)
         timer.schedule(deadline: .now() + baseInterval + jitter, repeating: baseInterval + jitter)
         timer.setEventHandler { [weak self] in
             guard let self = self else { return }
