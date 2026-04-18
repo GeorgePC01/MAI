@@ -101,6 +101,45 @@ Ver `docs/SECURITY_HARDENING_PLAN.md` para el plan completo.
 
 ---
 
+## v0.9.7.10 (2026-04-18 CST) — Secure Enclave Seed Wrap (Paso 4 plan semanal)
+
+### Secure Enclave-backed seed protection
+- **Nuevo archivo**: `Sources/MAI/SecureEnclaveKeyring.swift` (~130 líneas)
+- Encapsula `SecureEnclave.P256.KeyAgreement.PrivateKey` (CryptoKit) + Keychain
+- Primer launch: genera SE private key, hace ECDH con una ephemeral public key, deriva wrap key vía HKDF-SHA256, cifra `baseSeed` con AES-GCM y guarda blob en Keychain (`kSecAttrAccessibleWhenUnlockedThisDeviceOnly`)
+- Launches posteriores: lee blob, ECDH con SE private key (nunca sale del hardware) + ephemeral public embebida, HKDF → wrap key → AES-GCM decrypt → baseSeed
+- Blob format: `[2B seLen][sePrivKey.dataRepresentation][2B ephLen][ephPub.rawRepresentation][AES-GCM sealed]`
+
+### Integración en `WKRenderPipeline.deriveKey(salt:)`
+- Compute `baseSeed` from C1-C4 (igual que antes)
+- `seed = SecureEnclaveKeyring.shared.getOrWrapSeed { baseSeed } ?? baseSeed`
+- PBKDF2-HMAC-SHA256(seed, salt, 50k) → AES key (igual que antes)
+- **Scripts encrypted at build time siguen descifrándose correctamente** — el seed final es idéntico al previo a SE, solo agregamos una capa de protección at-rest
+
+### Fallback
+Si SE no disponible (Macs muy viejos sin T2), Keychain falla, o cualquier paso del wrap/unwrap falla → retorna nil → cae al `baseSeed` raw. Decryption NUNCA se rompe.
+
+### Security delta
+- Con solo binario en otra máquina: sin cambio (C1-C4 hardcoded siguen extraíbles)
+- Con binario + mismo device: Keychain entry solo accesible por la app firmada con este `code signing identity` — sin Developer ID hoy el identity cambia por build, con Developer ID quedará estable y device-bound
+- Con binario + dylib injection en same device: SE key opera dentro del Secure Enclave, dylib no puede extraerla directamente (solo puede forzar operaciones ECDH legítimas)
+- **Base para Developer ID**: cuando lleguemos al cert estable, el Keychain entry persistirá entre updates legítimos y bloqueará impersonation
+
+### Verificación
+- Primer launch: Keychain entry creada con `cdat` timestamp
+- Segundo launch: `cdat` sin cambios → entry leída, no regenerada
+- YouTube ad blocking funciona end-to-end en Release build (prueba que wrap+unwrap produce la key correcta para PBKDF2)
+
+### Plan anti-RE: estado final
+- ✅ Paso 1 (v0.9.7.8): Release + `-O` + `strip` + `-dead_strip` + anti-strip preservation
+- ✅ Paso 2 (v0.9.7.8): `@_used` XOR keys + `@inline(never)` _denyDebuggerAttach
+- ✅ Paso 3 (v0.9.7.9): Watchdog 8-15s → 1-2s
+- ✅ Paso 4 (v0.9.7.10): Secure Enclave seed wrap
+
+**Pendiente hoy**: Apple Developer ID $99/año → remover `com.apple.security.cs.disable-library-validation` de entitlements → re-firmar todo con mismo Team ID → **cierra vuln crítica real** (dylib injection bloqueada + Keychain binding robusto).
+
+---
+
 ## v0.9.7.9 (2026-04-18 CST) — Anti-RE Watchdog Frequency (Paso 3 plan semanal)
 
 ### Watchdog interval: 8-15s → 1-2s
