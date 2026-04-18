@@ -101,7 +101,56 @@ Ver `docs/SECURITY_HARDENING_PLAN.md` para el plan completo.
 
 ---
 
-## v0.9.7.7-wip (2026-04-14 CST) — UX Polish: DevTools Multi-Window + Chrome-Style Translation Popover + Status Bar Toggle
+## v0.9.7.8 (2026-04-18 CST) — Anti-RE Release Hardening + Ad Blocker Player UI Protection
+
+### Anti-RE Release Build Hardening (Plan anti-RE semanal — Paso 1 + 2)
+
+#### Paso 2: Símbolos retenidos vía `@_used`
+- **Archivo**: `Sources/MAI/WKRenderPipeline.swift:77-78`
+- Keys XOR `_ka` y `_kb` marcadas con `@_used` para prevenir elisión por el compilador Swift bajo `-O` y por el linker bajo `-dead_strip`
+- `Sources/MAI/WKRenderPipeline.swift:33`: `@inline(never)` añadido a `_denyDebuggerAttach()` para que `-O` no reordene/elida la llamada a `ptrace(PT_DENY_ATTACH)`
+- **Package.swift**: `.enableExperimentalFeature("SymbolLinkageMarkers")` para habilitar el atributo `@_used` (underscored private API)
+
+#### Paso 1: Flags Release + anti-strip preservation
+- **Package.swift** linker settings (solo `.when(configuration: .release)`):
+  - `-Xlinker -dead_strip`: elimina símbolos no referenciados (reduce superficie de ataque + tamaño binario)
+  - `-Xlinker -u _ptrace`: fuerza al linker a preservar el import de `ptrace` (usado para PT_DENY_ATTACH aunque el Swift optimizer no lo vea directamente)
+- **Makefile**: nuevos targets `bundle-release` y `app-release` que usan `build` (Release) en vez de `build-debug`. Path `make app` sin cambios (queda para dev).
+- **Verificación con `nm`**: `_ka`, `_kb`, `_ptrace`, `_task_get_exception_ports`, `deobf`, `_s_frida/_s_cycript/_s_substrate` todos presentes en el Release binary tras `-dead_strip`.
+
+#### Métricas del binario Release
+| | Debug bundle (v0.9.7.7) | Release bundle (v0.9.7.8) |
+|---|---|---|
+| Binario | 7,1 MB | **2,9 MB** (-60%) |
+| `-O` optimization | No | Sí |
+| `-dead_strip` | No | Sí |
+
+### Ad Blocker Player UI Protection (bugfix encontrado durante testing Release)
+
+Usuario reportó: click en gear ⚙️ (configuración calidad) cierra el menú instantáneamente. Investigación: `closePopups()` del ad blocker corre cada 200ms dentro del loop `handleAds()` y removía diálogos del player junto con los de enforcement. Bug también afectaba el botón de comentarios in-player.
+
+**Fix en `Tools/scripts/adblock.js`**:
+- Nueva función `_isPlayerUI(el)`: retorna `true` si `el.closest('.html5-video-player')` match
+- Nueva función `_isPlayerMenuOpen()`: detecta cualquier popup/panel visible dentro del player (gear, calidad, subtítulos, share, save, etc.) — busca `.ytp-popup`, `.ytp-panel-menu`, `.ytp-contextmenu`, `[role="menu"]`, `[role="dialog"]`, `[aria-expanded="true"]` y engagement panels con `visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED"`
+- Nueva función `_isVisible(el)`: verifica `offsetParent`, `display`, `visibility`, `opacity`, dimensiones > 0
+- **Tracking de interacción del usuario**: listeners `pointerdown` + `click` en fase captura detectan clicks en `.html5-video-player`, `.ytp-chrome-controls`, `.ytp-chrome-top`, `.ytp-chrome-bottom`. Guarda timestamp → `_isRecentPlayerInteraction()` retorna `true` si fue hace <5s. Cubre panels/dialogs que YouTube monta FUERA del player DOM (engagement panels, etc.)
+- **`closePopups()` sale inmediatamente** si `_isPlayerMenuOpen() || _isRecentPlayerInteraction()`
+- Todos los `.remove()` y `.click()` del ad blocker ahora saltan si `_isPlayerUI()` matches
+
+**Fix en `Tools/scripts/cleanup.js`**:
+- `_isPlayerUI(el)` helper + guard en loop `safeToRemove` para nunca tocar elementos dentro del player
+
+### Impacto en ad blocking
+Ninguno cuando el usuario no está interactuando con el player. Los selectores target (`ytd-ad-slot-renderer`, `ytd-enforcement-message-view-model`, `tp-yt-iron-overlay-backdrop`, etc.) nunca están dentro de `.html5-video-player` ni se activan por clicks en el player chrome, así que el ad blocker mantiene 100% su valor.
+
+### Pendiente del plan anti-RE
+- **Paso 3**: Watchdog 8-15s → 1-2s (30 min, riesgo cero)
+- **Paso 4**: Secure Enclave para clave AES (2-3h, riesgo bajo)
+- **Hoy 2026-04-18**: Apple Developer ID $99/año → remover `com.apple.security.cs.disable-library-validation` de `Resources/MAI.entitlements` (cierra vulnerabilidad crítica)
+
+---
+
+## v0.9.7.7 (2026-04-14 CST) — UX Polish: DevTools Multi-Window + Chrome-Style Translation Popover + Status Bar Toggle
 
 ### DevTools Multi-Window Fix
 - **Bug reportado**: abriendo 2 ventanas (ej: YouTube + Grafana via Cmd+N), Cmd+Opt+I siempre abría DevTools en la ventana principal, no en la ventana con foco.

@@ -61,8 +61,15 @@
                 'tp-yt-iron-overlay-backdrop',
                 'yt-mealbar-promo-renderer'
             ];
+            // Guardia: nunca tocar elementos dentro del player (settings, captions, etc.)
+            function _isPlayerUI(el) {
+                try { return !!(el && el.closest && el.closest('.html5-video-player')); } catch(e) { return false; }
+            }
             safeToRemove.forEach(function(sel) {
-                document.querySelectorAll(sel).forEach(function(el) { el.remove(); });
+                document.querySelectorAll(sel).forEach(function(el) {
+                    if (_isPlayerUI(el)) return;
+                    el.remove();
+                });
             });
             // Player-level ads — solo OCULTAR (el player necesita el DOM)
             var hideOnly = [

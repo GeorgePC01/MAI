@@ -225,7 +225,79 @@
             // Auto-cerrar popups de enforcement (seguro — fuera del player)
             // NO remover .ytp-ad-module (#1587: rompe state machine)
             // ============================================================
+            // Guardia: nunca tocar nada que esté DENTRO del player de video
+            // (protege gear settings, captions, PiP, cast, fullscreen, etc.)
+            function _isPlayerUI(el) {
+                try { return !!(el && el.closest && el.closest('.html5-video-player')); } catch(e) { return false; }
+            }
+            // Track de interacciones del usuario con el player chrome.
+            // Cualquier click/pointerdown en botones del player pausa cleanup 5s
+            // — cubre cualquier panel/popup/overlay que YouTube abra, incluso
+            // los que se montan fuera del player DOM (engagement panels, etc.)
+            var _userPlayerInteractAt = 0;
+            function _registerPlayerInteraction(e) {
+                try {
+                    var t = e && e.target;
+                    if (!t || !t.closest) return;
+                    if (t.closest('.html5-video-player') ||
+                        t.closest('.ytp-chrome-controls') ||
+                        t.closest('.ytp-chrome-top') ||
+                        t.closest('.ytp-chrome-bottom')) {
+                        _userPlayerInteractAt = Date.now();
+                    }
+                } catch(ex) {}
+            }
+            document.addEventListener('pointerdown', _registerPlayerInteraction, true);
+            document.addEventListener('click', _registerPlayerInteraction, true);
+            function _isRecentPlayerInteraction() {
+                return (Date.now() - _userPlayerInteractAt) < 5000;
+            }
+            // Detecta si un popup nativo del player está abierto (gear, calidad,
+            // subtítulos, comentarios del player, share, save, etc.). Cuando está
+            // abierto, pausamos operaciones agresivas para no cerrarlo.
+            function _isVisible(el) {
+                if (!el || el.offsetParent === null) return false;
+                try {
+                    var cs = window.getComputedStyle(el);
+                    if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false;
+                    return el.offsetWidth > 0 && el.offsetHeight > 0;
+                } catch(e) { return false; }
+            }
+            function _isPlayerMenuOpen() {
+                try {
+                    // 1. Cualquier popup/panel/menu dentro del player chrome visible
+                    var inPlayer = document.querySelectorAll(
+                        '.html5-video-player .ytp-popup, ' +
+                        '.html5-video-player .ytp-panel-menu, ' +
+                        '.html5-video-player .ytp-contextmenu, ' +
+                        '.html5-video-player .ytp-watch-later-panel, ' +
+                        '.html5-video-player .ytp-share-panel, ' +
+                        '.html5-video-player [role="menu"], ' +
+                        '.html5-video-player [role="dialog"]'
+                    );
+                    for (var i = 0; i < inPlayer.length; i++) {
+                        if (_isVisible(inPlayer[i])) return true;
+                    }
+                    // 2. Cualquier botón del player con aria-expanded="true"
+                    //    (cubre gear, comentarios, share, captions, más botones futuros)
+                    var expanded = document.querySelectorAll('.html5-video-player [aria-expanded="true"]');
+                    if (expanded.length > 0) return true;
+                    // 3. Miniplayer de comentarios/engagement overlay que YouTube monta
+                    //    a veces como hijo del player o adyacente
+                    var overlay = document.querySelectorAll(
+                        '.html5-video-player ytd-engagement-panel-section-list-renderer[visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED"]'
+                    );
+                    for (var j = 0; j < overlay.length; j++) {
+                        if (_isVisible(overlay[j])) return true;
+                    }
+                } catch(e) {}
+                return false;
+            }
             function closePopups() {
+                // PROTECCIÓN: si el usuario tiene abierto un menú del player o interactuó
+                // con él en los últimos 5s, no tocar NADA — esto cubre panels/dialogs/overlays
+                // que YouTube monte fuera del player DOM (comentarios, share, save, etc.)
+                if (_isPlayerMenuOpen() || _isRecentPlayerInteraction()) return;
                 var popupSelectors = [
                     'ytd-mealbar-promo-renderer',
                     'ytd-enforcement-message-view-model',
@@ -235,6 +307,7 @@
                 for (var ps = 0; ps < popupSelectors.length; ps++) {
                     var els = document.querySelectorAll(popupSelectors[ps]);
                     for (var e = 0; e < els.length; e++) {
+                        if (_isPlayerUI(els[e])) continue;
                         try { els[e].remove(); } catch(ex) {}
                     }
                 }
@@ -244,11 +317,14 @@
                     'button[aria-label="No thanks"], button[aria-label="No, gracias"]'
                 );
                 for (var d = 0; d < dismiss.length; d++) {
+                    if (_isPlayerUI(dismiss[d])) continue;
                     try { dismiss[d].click(); } catch(e) {}
                 }
                 // Cerrar diálogos abiertos (Centro de Anuncios, etc.)
+                // EXCLUIR diálogos del player (settings menu, quality submenu, etc.)
                 var dialogs = document.querySelectorAll('tp-yt-paper-dialog[aria-hidden="false"], tp-yt-paper-dialog[open]');
                 for (var di = 0; di < dialogs.length; di++) {
+                    if (_isPlayerUI(dialogs[di])) continue;
                     try { dialogs[di].remove(); } catch(e) {}
                 }
                 // Restaurar scroll
