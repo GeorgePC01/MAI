@@ -48,14 +48,22 @@ let package = Package(
             dependencies: ["CEFWrapper", "SecureMem"],
             path: "Sources/MAI",
             swiftSettings: [
-                .unsafeFlags(["-parse-as-library"])
+                .unsafeFlags(["-parse-as-library"]),
+                .enableExperimentalFeature("SymbolLinkageMarkers")
             ],
             linkerSettings: [
                 .linkedFramework("CoreML"),
                 .unsafeFlags([
                     "-Xlinker", "-rpath",
                     "-Xlinker", "@executable_path/../Frameworks",
-                ])
+                ]),
+                // Release-only anti-RE hardening:
+                //  -dead_strip removes unreferenced symbols (reduces attack surface + binary size)
+                //  -u _ptrace forces linker to keep ptrace import alive (used by PT_DENY_ATTACH)
+                .unsafeFlags([
+                    "-Xlinker", "-dead_strip",
+                    "-Xlinker", "-u", "-Xlinker", "_ptrace",
+                ], .when(configuration: .release))
             ]
         )
     ],

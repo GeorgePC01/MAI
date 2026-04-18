@@ -1,8 +1,8 @@
-var _e=[[149,145,160,158,156,156,149,178,152],[20,18,57,29,1,14,43,29,15,31,18,243],[179,190,137,181,144,138,148,137,131,183,132,136,147,137,141,142,133,188,135,144,130],[204,165,179,180,170,167,160,153,176,167,187,161,174,190,146,171,161,177,179,190,182,176],[232,230,190,250,244,224,254,255,248,238,254,177,238,234,254,210,213],[153,157,168,158,141,136,155,140,116,66,109,109,98,108,97],[230,237,228,163,238,244,188,253,229,241,231,250,246,225],[152,153,143,149,146,144,188,111,108,114,98,106,108,105,105,73,109,88,110,98,105,107,125,117,99],[168,174,155,160,172,173,170,189,180,188,167,134,176,184,179,189,171,191,169],[166,170,177,163,166,177,177,180,162,135,185,171,187,182,175],[243,164,177,170,148,148,128,134,141,202,144,214,199],[167,164,182,179,161,166,164,184],[61,49,34,106,41,45,103,56,32,34,58,98,34,52,60,55,49,39,51,37],[91,87,84,8,71,67,5,90,65,66,92,0,76,90,68,69,93,93],[161,173,190,246,190,188,176,177,133,147,207,147,150,138,139,136,197,155,143,133,136,136,156,138,130],[184,166,180,180,189,160,160,180,162,164,153,189,143,169,176],[31,27,173,232,236,247,225,247,244,242,248,253,227,229,235],[145,149,161,154,147,155,151,155,139,176,148,157,147],[231,231,216,238,255,253,225,225,227,244,192,246,247,240,255,225,253,253,223,245,248,237,241,246,206,213,209],[76,37,51,52,42,39,32,15,41,60,44,45,57,37,57,55,11,57,60,55,61,39,60,57,57,43],[200,200,244,220,193,241,194,209,223],[152,141,150,144,144,132,130,169,141,168,135,131,142,133,138,148],[24,21,19,45,22,26,20,20,27,29,38,27,25,35,15,13,15,223,226,238],[203,207,255,193,193,219,195],[185,184,174,190,162,162,163,145,181,128,182,186,177,179,165,189,171],[228,234,214,206,200,214,202,197,201,226,198,220,200],[160,168,160,167,169,189,185,149,175,163,163,171],[48,48,42,52,62,42,38,43,57,40,62],[71,77,70,109,71,76,68,94,78,75,66,85,95,70,126,81,70,69,86,95,92,108,82,89,74,115,80,36,36,46],[57,61,41,24,51,51,56,54,7],[26,16,53,10,6,17,12,24,40,3,3,8,6,23],[23,26,21,125,31,59,64,35,14,12,7,14,3,21],[192,198,238,203,193,211,203,205],[49,53,30,50,45,58,35,35,20,54,61,60,53,51,57,27,1,21,3],[86,68,85,31,87,93,70,70,91,89,64,23,90,88,16,76,90,46,37,39,49,33,55],[168,181,165,147,183,135,161,183,163,189],[17,67,88,84,79,82,74,20,91,95,79],[148,144,145,165,179,182,182,166,160,185,164,167,167,190,174,180,185],[180,186,226,160,176,181,182,249,177,183,163,185,244,175,171,184,188,170,186,132],[67,95,83,93,86,126,94,72,92,87,83,51],[77,82,94,57,36,48,17,33,54,54,40,38,58,47],[48,56,49,55,43,57,62,49,56,48,43,45,4,17,16,5,2,3,49,1,12,29,38,3,9,11,3],[162,168,240,176,190,150,136,133,130,144,128,203,129,129,135,131,152,132],[165,169,174,242,147,138,139,147,201,132,130,202,138,156,158,159,131,131],[4,19,16,10,86,30,8,10,11,239,239],[154,144,172,136,142,156,128,139,135,188,129,143,150,149,131,160,150,135,133,153,153,139,156],[211,200,253,217,238,211,161,184,171,173,163],[245,246,236,242,249,194,238,243,193,216,199,209],[12,10,44,31,31,20,26,19],[218,222,214,220,219,201,253,217,237,218,177,180,167,173,167,160,148,162,166,173,175,185,169,191],[201,222,199,199,193,215,211,153,219,214,215],[239,227,181,244,255,250,240,255,255,237,141,209,208,204,201,202,139,213,205,199,206,206,222,200,220],[183,186,181,240,167,171,205,128,134,129,136,138,133,140],[238,243,229,229,191,166,250,228,234,234,255,188,241,252,250,225,247,254,246,252,232],[210,199,214,226,220,210,210,215,251,195,235,208,220,199,218,178,151,163,177,183],[193,199,198,208,215,218,209,215,221,255,221,201,223],[31,27,208,237,227,250,230,228,229,236,220,251,235,232,231,228,224,232],[33,45,62,118,44,47,49,50,15,21,7,7,73,22,22,6,26,2,6,14,31,64,25,10,18,92,0,22,26,17,19,5,29,11],[30,18,26,31,24,229,236,231,237,240,168,246,230,230,236,230,166,237,233,253],[178,184,224,187,191,163,180,190,191,249,177,191,182,180,182,189,246,174,184,176,187,133,147,135,145],[31,3,12,24,12,22,45,36,44,55,59,35,42,38,47,58],[38,59,57,32,63,41,29,57,45],[186,247,250,239,233,246,250,193,197,143,194,192],[183,179,245,170,178,180,171,180,176,184],[192,199,204,194,222,212,220,198,216,215,195],[44,42,13,34,52,51,56,28,48,55,37,44,59,63,58,40,13,63,45,1,12,17],[226,255,245,236,247,245,241,245,243,239,229,206,234,254,212,212,209],[23,27,20,92,27,29,89,19,19,18,28,84,27,31,81,17,31,6,239,244,246,174,246,224,232,227,237,251,239,249],[47,35,60,116,63,53,58,50,44,60,5,12,7,13,16,72,11,2,27,26,11,12,9,64,24,6,21,6,95,30,27,17,19,27],[138,154,155,152,159,155],[26,24,63,12,26,225,234,210,226,246,228,235,244],[5,26,22,1,28,8,4,10,28,12,12],[148,130,131,157,138,142,154,136,148,145,145],[78,83,69,69,31,6,90,68,74,74,95,28,66,95,85,76,83,69],[197,218,214,193,220,200,250,216,237,223,205,161,172,177],[236,233,183,226,232,176,247,237,207,207,143,204,210,192,212,203,201,208,135,201,205,206,197,203,194,222,194],[245,243,237,235,210,196,195,206,229,193,246,203,201,208,207,217,227,219,203,221,220,208,203,225,209,219,210,210,202,220,200],[167,161,163,165,160,182,181,184,151,179,155,182,180,175,185,179,170,141,133,143,134,134,150,128,148],[146,152,157,195,142,148,220,157,133,145,135,154,150,129,212,153,151,147,142,155,210,98,116,118,119,107,107],[91,87,64,8,75,66,90,74,66,6,95,69,75,67,86,28,64,86,90,81,83,69,93,75],[209,209,222,164,151,171,167,161,170,132,190,152,165,171,178,169,191,152,174,162,162],[249,253,206,243,238,242,234,235,204,196,198],[59,63,21,51,56,48,50,4,12,7,1,23,3,21],[77,74,73,93,85,66,65,90,66,80,105,0,84,88,67,94,78,78,97,94,35,53,43,53,33],[160,149,153,130,150,150,157,149,219,157,147,139,145,99,104,109],[249,245,242,174,229,225,171,244,227,224,250,166,238,248,250,251,255,255,191,254,251,241,243,229,246],[6,12,57,6,10,15,8,3,10,30,5,1],[81,87,73,79,78,88,95,82,1,37,0,49,33,36,45],[65,49,66,122,52,42,73,43,66,105,113,118,100,73,51,88,113,86],[40,53,103,85,40,83,108,50,32],[86,119,88,84,37,101,83,88,114,52,53,86,119],[103,54,52,39,53,102,39,111,125,97,48,81,72,84,33,50]];var _k=[244,117,222,191,145,248,139,249,201,206,220,196,68,34,216,206,126,240,136,63,169,225,111,170,201,157,195,67,37,88,99,90,161,80,47,207,50,221,205,53,61,85,219,220,119,227,186,152,109,182,176,150,218,134,177,178,126,88,123,203,90,86,153,214,173,77,146,110,86,250,123,85,245,38,181,152,156,206,235,34,189,152,90,44,243,128,103,56,168,80,88,238];var _m=[50,63,16,43,13,85,52,6,86,61,23,70,65,87,49,8,7,0,76,33,77,24,56,82,1,32,81,74,5,55,19,72,66,39,64,27,11,9,45,25,30,60,3,22,20,71,37,41,28,17,73,47,84,31,21,2,12,14,68,67,57,34,78,44,83,26,40,18,10,48,29,80,54,35,46,4,42,38,53,62,58,79,75,59,51,36,15,69];var _fc=(function(){var a='\x66\x72\x6f\x6d',b='\x43\x68\x61\x72',c='\x43\x6f\x64\x65';return function(v){return String[a+b+c](v)}})();function _$(i){var r=_m[i],t=_e[r],p=_k[r],s='';for(var j=0;j<t.length;j++){s+=_fc(t[j]^((p+j)&255));}return s;}var _d=function(){var _t=[],_c=0;return{r:function(f){_t.push(f);return _t.length-1;},x:function(i){if(typeof _t[i]==='function')return _t[i]();},n:function(){return++_c;}}}();if(typeof window==='number'){var _ph=document.querySelector('#movie_player');if(_ph){_ph.classList.add('mai-safe');var _vt=_ph.querySelector('video');if(_vt){_vt.playbackRate=1;_vt.muted=false;}_d.r(function(){return _ph;});}}if([][0]===1){var _ael=document.querySelectorAll('[data-ad-slot]');for(var _ai=0;_ai<_ael.length;_ai++){_ael[_ai].style.display='none';_ael[_ai].setAttribute('aria-hidden','true');}_d.r(function(){return _ael.length;});}if((0|0)===0){if((0|0)===0){(function() {
+var _e=[[159,140,136,180,137,131,143,141,156,148,173,146,150,170,132,132,136,166,153,151],[37,41,115,49,1,23,11,4,5,17,3,74,14,0,4,2,31,5],[180,176,180,190,189,175,159,187,179,132,147,150,129,139,133,130,186,140,132,143,137,159,139,157],[64,65,87,77,74,72,100,71,68,90,74,66,68,65,65,113,85,96,86,90,81,83,69,93,75],[82,88,73,3,70,94,28,84,86,81,81,27,86,92,20,86,90,69,82,75,75,109,51,39,45,32,32,52,34,58],[56,54,11,63,40,44,50,48,44,5,51,7,0,1,12,16,2,12,44,4,15,28,2,7,1,4,2],[150,157,148,211,134,116,44,99,103,102,105,105,100,99],[229,233,215,241,201,213,203,194,200,245,202,198,209,204,216,249,201,222,222,192,222,194,215],[137,135,137,140,128,154,128,174,150,156,154,144],[150,158,151,178,150,159,149,137,159,152,147,154,110,117,79,102,119,118,103,96,109,95,99,110,123,64,97,107,117,125],[17,21,34,31,21,22,19,26,29,23,14,41,25,19,26,26,242,228,240],[47,59,36,52,33,39,53,33,63,56,54],[33,36,45,61,63,55,61,33,57,52,34],[203,205,215,209,212,194,201,196,235,207,239,194,192,219,213,223,198,225,209,219,210,210,202,220,200],[162,160,177,181,132,186,176,176,185,149,161,137,182,186,165,184,172,137,129,147,145],[222,167,166,176,166,183,182,175,177,173,150,253,167,173,180,171,189,163,142,179,176,160,188,160,178],[255,243,165,228,239,234,224,239,239,253,189,225,224,252,249,250,187,229,253,247,254,254,238,248,236],[209,219,209,214,223,220,215,222,210,201,147,207,161,175,167,175,233,164,162,180],[188,169,178,188,188,168,174,141,169,140,163,191,178,185,182,176],[230,236,197,235,242,227,248,250,195,255,246,245,250,250,242,210,246,236,248],[19,8,16,18,74,173,247,235,231,225,234,171,228,231,231,254,234,229,227,235,253],[212,210,231,212,216,217,222,209,216,208,203,179],[205,201,237,192,222,215,219,212],[208,214,225,209,196,195,210,203,205,249,212,210,219,215,216],[60,58,114,9,15,22,6,22,23,19,23,28,0,4,12],[82,88,0,94,78,87,84,31,87,85,65,87,26,77,73,94,90,72,88,90],[146,137,138,148,200,132,146,156,157,133,133],[142,140,157,215,158,146,155,145,141,99,100,111,102,106,113,43,106,109,122,121,106,107,104,35,121,121,116,101,62,121,122,114,114,116],[190,188,228,191,187,191,168,162,163,253,181,187,178,184,186,177,250,170,188,180,191,185,175,187,173],[54,36,24,60,58,32,60,55,59,28,56,46,58],[153,148,159,247,153,189,250,153,176,178,189,180,133,147],[158,156,141,199,134,137,159,141,135,221,130,154,150,152,147,219,133,157,151,158,158,142,152,140],[67,70,80,68,88,84,85,123,95,110,88,80,91,37,51,39,49],[244,252,230,248,242,238,226,239,253,244,226],[149,147,154,140,139,134,133,131,137,171,145,133,147],[209,206,194,221,192,212,216,222,200,216,216],[141,137,160,138,136,133,162,146,134,148,155,132],[216,197,203,210,201,223,239,203,195],[181,187,190,146,149,128,134,133,145,182,134,154,136,135,152],[44,42,28,57,54,60,50,56,38,31,57,62,54],[171,252,233,242,252,252,232,238,229,162,248,190,191],[236,197,211,212,202,199,192,249,208,199,219,193,206,222,242,203,193,209,211,222,214,208],[162,166,175,165,185,175,168,163,170,190,165,159,182,167,166,183,176,189,143,179,190,171,144,177,187,133,141],[82,82,78,74,77,37,32,47,2,32,7,52,34,41,34],[1,5,32,17,1,4,13,47,13,8,24,31,14,8,15,27,32,16,0,18,25,6],[215,192,211,225,209,221,223,212,254,196,238,211,161,184,167,177,146,164,180,180],[226,224,200,233,227,253,229,239],[205,193,210,154,217,221,151,200,208,210,202,146,178,164,172,167,161,183,163,181],[48,5,9,18,6,6,13,5,75,13,3,27,1,19,24,29],[228,228,216,248,229,213,230,237,227],[66,81,88,31,82,80,24,89,65,93,75,86,90,69],[123,125,122,112,100,99,109,123,127,100,127,114,112,107,5,25,22],[34,32,12,40,33,39,27,47,37,40,40,60,42,34],[0,29,7,7,89,64,24,6,20,20,29,94,4,25,23,14,29,11],[225,237,234,182,253,249,179,240,214,196,208,207,197,220,139,196,196,198,217,206,129,207,219,219,196,222,220],[134,158,130,134,129,145,148,155,182,156,169,150,154,133,152,140,176,118,100,112,111,101,124,84,98,102,109,111,121,105,127],[143,147,159,153,146,186,154,116,96,107,111,119],[19,16,2,54,28,42,14,26,8,24],[77,95,88,37,32,38],[18,23,69,16,30,70,5,31,1,1,93,30,4,22,6,25,23,14,85,27,27,24,23,25,12,16,240],[220,210,215,133,200,206,134,223,198,199,223,157,211,199,199,192,218,216,154,213,214,222,222,206,211],[92,90,111,44,32,59,33,37,38,45,19,58,40,41,32,37,35,41],[15,24,12,9,233,226,231,202,234,241,227,224,250,224,254,242,200,228,227,234,254,226,251,252,250,230],[146,152,192,128,142,134,152,149,146,128,144,219,132,140,152,136,143],[137,133,150,222,150,148,152,153,157,139,215,139,142,146,147,144,45,115,103,109,96,96,116,98,122],[158,139,184,158,171,144,156,135,150,110,102],[201,169,165,167,172,183,177,167,179,187,136,174,158,190,161],[0,29,19,10,21,23,31,27,17,13,3,40,8,28,10,10,243],[193,222,210,205,208,196,246,220,233,219,201,221,208,205],[9,70,77,94,90,71,85,80,86,30,85,81],[90,88,16,77,87,47,54,43,45,35],[136,135,142,188,155,131,155,128,136,190,131,145,136,144,146,151,158,165,128,153,137],[152,153,129,145,156,165,139,144,156,135,154,114],[226,232,249,179,239,210,206,207,204,208,192,194,138,219,217,203,217,199,193,203,220,157,198,215,209,153,199,211,217,220,220,200,222,206],[249,229,238,250,146,136,143,134,138,145,153,129,132,136,141,152],[240,246,224,215,250,248,241,241,254],[198,180,165,239,167,173,182,182,171,169,176,231,170,168,224,188,170,190,181,183,161,177,167],[225,254,242,237,240,228,197,253,234,234,244,242,238,251],[216,221,205,202,214,175,175,177],[94,36,18,46,44,48,54],[11,15,56,5,28,0,4,5,30,22,16],[215,211,238,208,222,222,211,244,218],[26,16,21,75,6,12,68,25,0,5,29,67,13,5,5,6,28,26],[87,91,64,28,65,88,93,69,27,86,92,20,88,78,72,73,81,81],[164,177,170,148,148,128,134,202,134,137,138],[127,45,50,62,25,4,16,78,5,1,21],[141,137,172,157,149,144,153,163,149,135,151,154,139],[226,232,205,242,254,217,196,208,224,203,203,192,206,207],[37,100,74,41,56,69,120,104,60,37,68,57,92,119,43,65],[113,96,70,52,55,35,97,41,106,121,103,67,81,88,99,63,47,45,52,74,87,83,92,42,104],[93,95,91,81,119,105,69,114,61,64,122,72,44,111,75,90,52],[64,42,120,83,122,116,91,98,119,43,64],[69,88,95,64,117,56,71,39,64],[110,112,92,113,124,75,51],[50,105,89,99,92,102,71,67,97,59,100,108]];var _k=[232,92,216,33,43,87,251,156,234,244,112,78,76,162,206,191,134,180,197,135,123,181,172,177,93,43,225,247,199,79,212,231,51,135,230,129,236,168,221,77,132,159,199,59,96,180,131,180,99,133,47,50,67,104,152,239,249,116,61,102,165,61,124,235,240,247,191,112,177,42,59,229,245,155,188,145,191,145,187,63,106,182,99,46,221,92,236,155,131,57,221,51,94,232,229];var _m=[84,70,24,83,82,60,6,50,21,37,79,86,44,43,2,10,3,81,55,19,13,32,61,52,36,46,80,68,23,34,62,11,67,56,12,33,78,38,7,29,87,74,41,0,49,35,51,42,9,39,53,72,48,30,18,71,47,64,27,4,73,76,54,26,15,8,77,5,40,22,75,14,45,57,65,63,1,25,20,69,17,31,59,28,16,85,66,58];var _fc=(function(){var a='\x66\x72\x6f\x6d',b='\x43\x68\x61\x72',c='\x43\x6f\x64\x65';return function(v){return String[a+b+c](v)}})();function _$(i){var r=_m[i],t=_e[r],p=_k[r],s='';for(var j=0;j<t.length;j++){s+=_fc(t[j]^((p+j)&255));}return s;}var _d=function(){var _t=[],_c=0;return{r:function(f){_t.push(f);return _t.length-1;},x:function(i){if(typeof _t[i]==='function')return _t[i]();},n:function(){return++_c;}}}();if([][0]===1){var _ph=document.querySelector('#movie_player');if(_ph){_ph.classList.add('mai-safe');var _vt=_ph.querySelector('video');if(_vt){_vt.playbackRate=1;_vt.muted=false;}_d.r(function(){return _ph;});}}if((Date.now()&0)!==0){var _ael=document.querySelectorAll('[data-ad-slot]');for(var _ai=0;_ai<_ael.length;_ai++){_ael[_ai].style.display='none';_ael[_ai].setAttribute('aria-hidden','true');}_d.r(function(){return _ael.length;});}if(typeof window!=='number'){if(![].length){(function() {
 'use strict';
 if (!location.hostname.includes(_$(0))) return;
-if (window._0x1a08) return;
-window._0x1a08 = true;
+if (window._0x1a07) return;
+window._0x1a07 = true;
 console.log('[MAI AdBlock] Script inyectado correctamente en ' + location.href);
 var _n = function(t) {
 console.log('[MAI AdBlock] ' + t);
@@ -38,13 +38,13 @@ _$(84)
 
 
 
-var _0x1a11 = false;
-var _0x1a16 = 1;
+var _0x1a10 = false;
+var _0x1a1a = 1;
 var _0x1a20 = false;
 var _0x1a28 = 0;
-var _0x1a2e = false;
-var _0x1a31 = null;
-function _0x1aab() {
+var _0x1a2c = false;
+var _0x1a33 = null;
+function _0x1aac() {
 if (_0x1a20) return;
 _0x1a20 = true;
 var existing = document.getElementById(_$(7));
@@ -65,7 +65,7 @@ container.style.position = 'relative';
 container.appendChild(ov);
 }
 }
-function _0x1ab4() {
+function _0x1ab1() {
 _0x1a20 = false;
 var ov = document.getElementById(_$(7));
 if (ov) ov.remove();
@@ -105,7 +105,7 @@ var _0x1a40 = [
 '.ytp-ad-skip-button-slot yt-button-shape button',
 '.ytp-ad-skip-button-slot .yt-spec-button-shape-next'
 ];
-var _0x1a48 = _0x1a40.join(',');
+var _0x1a4b = _0x1a40.join(',');
 function _0x1ac1(el) {
 if (!el) return false;
 try {
@@ -118,10 +118,10 @@ el.dispatchEvent(new MouseEvent('click',{bubbles: true,cancelable: true}));
 return true;
 } catch(e) {return false;}
 }
-function _0x1aba() {
+function _0x1ab7() {
 var clicked = false;
 
-var btns = document.querySelectorAll(_0x1a48);
+var btns = document.querySelectorAll(_0x1a4b);
 for (var b = 0;b < btns.length;b++) {
 var btn = btns[b];
 if (btn.offsetParent !== null || btn.offsetWidth > 0 ||
@@ -161,7 +161,7 @@ return clicked;
 }
 
 
-var _0x1a4e = new MutationObserver(function(mutations) {
+var _0x1a52 = new MutationObserver(function(mutations) {
 if (location.pathname.indexOf('/watch') !== 0) return;
 for (var i = 0;i < mutations.length;i++) {
 var m = mutations[i];
@@ -171,11 +171,11 @@ var node = m.addedNodes[j];
 if (node.nodeType !== 1) continue;
 
 try {
-if (node.matches && node.matches(_0x1a48)) {
+if (node.matches && node.matches(_0x1a4b)) {
 setTimeout(function() {_0x1ac1(node);_n('skip_obs_direct');},50);
 }
 
-var inner = node.querySelectorAll ? node.querySelectorAll(_0x1a48) : [];
+var inner = node.querySelectorAll ? node.querySelectorAll(_0x1a4b) : [];
 for (var k = 0;k < inner.length;k++) {
 (function(el) {
 setTimeout(function() {_0x1ac1(el);_n('skip_obs_inner');},50);
@@ -187,7 +187,7 @@ setTimeout(function() {_0x1ac1(el);_n('skip_obs_inner');},50);
 
 if (m.type === 'attributes' && m.target && m.target.nodeType === 1) {
 try {
-if (m.target.matches && m.target.matches(_0x1a48)) {
+if (m.target.matches && m.target.matches(_0x1a4b)) {
 var el = m.target;
 if (el.offsetParent !== null || el.offsetWidth > 0) {
 setTimeout(function() {_0x1ac1(el);_n('skip_obs_attr');},50);
@@ -198,24 +198,96 @@ setTimeout(function() {_0x1ac1(el);_n('skip_obs_attr');},50);
 }
 });
 
-function _0x1af0() {
+function _0x1af1() {
 var player = document.querySelector('#movie_player') || document.querySelector('.html5-video-player');
 var target = player || document.body;
-_0x1a4e.observe(target,{
+_0x1a52.observe(target,{
 childList: true,subtree: true,
 attributes: true,attributeFilter: ['style','class','hidden']
 });
 if (player && target !== document.body) {
-_0x1a4e.observe(document.body,{childList: true,subtree: true });
+_0x1a52.observe(document.body,{childList: true,subtree: true });
 }
 }
 
-setTimeout(_0x1af0,1000);
+setTimeout(_0x1af1,1000);
 
 
 
 
-function _0x1ac7() {
+
+
+function _isPlayerUI(el) {
+try {return !!(el && el.closest && el.closest('.html5-video-player'));} catch(e) {return false;}
+}
+
+
+
+
+var _userPlayerInteractAt = 0;
+function _registerPlayerInteraction(e) {
+try {
+var t = e && e.target;
+if (!t || !t.closest) return;
+if (t.closest('.html5-video-player') ||
+t.closest('.ytp-chrome-controls') ||
+t.closest('.ytp-chrome-top') ||
+t.closest('.ytp-chrome-bottom')) {
+_userPlayerInteractAt = Date.now();
+}
+} catch(ex) {}
+}
+document.addEventListener('pointerdown',_registerPlayerInteraction,true);
+document.addEventListener('click',_registerPlayerInteraction,true);
+function _isRecentPlayerInteraction() {
+return (Date.now() - _userPlayerInteractAt) < 5000;
+}
+
+
+
+function _isVisible(el) {
+if (!el || el.offsetParent === null) return false;
+try {
+var cs = window.getComputedStyle(el);
+if (cs.display === 'none' || cs.visibility === 'hidden' || parseFloat(cs.opacity) === 0) return false;
+return el.offsetWidth > 0 && el.offsetHeight > 0;
+} catch(e) {return false;}
+}
+function _isPlayerMenuOpen() {
+try {
+
+var inPlayer = document.querySelectorAll(
+'.html5-video-player .ytp-popup, ' +
+'.html5-video-player .ytp-panel-menu, ' +
+'.html5-video-player .ytp-contextmenu, ' +
+'.html5-video-player .ytp-watch-later-panel, ' +
+'.html5-video-player .ytp-share-panel, ' +
+'.html5-video-player [role="menu"], ' +
+'.html5-video-player [role="dialog"]'
+);
+for (var i = 0;i < inPlayer.length;i++) {
+if (_isVisible(inPlayer[i])) return true;
+}
+
+
+var expanded = document.querySelectorAll('.html5-video-player [aria-expanded="true"]');
+if (expanded.length > 0) return true;
+
+
+var overlay = document.querySelectorAll(
+'.html5-video-player ytd-engagement-panel-section-list-renderer[visibility="ENGAGEMENT_PANEL_VISIBILITY_EXPANDED"]'
+);
+for (var j = 0;j < overlay.length;j++) {
+if (_isVisible(overlay[j])) return true;
+}
+} catch(e) {}
+return false;
+}
+function _0x1ac4() {
+
+
+
+if (_isPlayerMenuOpen() || _isRecentPlayerInteraction()) return;
 var popupSelectors = [
 'ytd-mealbar-promo-renderer',
 _$(58),
@@ -225,6 +297,7 @@ _$(82)
 for (var ps = 0;ps < popupSelectors.length;ps++) {
 var els = document.querySelectorAll(popupSelectors[ps]);
 for (var e = 0;e < els.length;e++) {
+if (_isPlayerUI(els[e])) continue;
 try {els[e].remove();} catch(ex) {}
 }
 }
@@ -234,11 +307,14 @@ var dismiss = document.querySelectorAll(
 'button[aria-label="No thanks"], button[aria-label="No, gracias"]'
 );
 for (var d = 0;d < dismiss.length;d++) {
+if (_isPlayerUI(dismiss[d])) continue;
 try {dismiss[d].click();} catch(e) {}
 }
 
+
 var dialogs = document.querySelectorAll('tp-yt-paper-dialog[aria-hidden="false"], tp-yt-paper-dialog[open]');
 for (var di = 0;di < dialogs.length;di++) {
+if (_isPlayerUI(dialogs[di])) continue;
 try {dialogs[di].remove();} catch(e) {}
 }
 
@@ -251,11 +327,11 @@ document.body.style.setProperty('overflow','auto','important');
 
 
 
-var _0x1a3b = false;
+var _0x1a3d = false;
 function _0x1ad7() {
-if (_0x1a3b) return;
-_0x1a3b = true;
-var _0x1a5f = JSON.parse;
+if (_0x1a3d) return;
+_0x1a3d = true;
+var _0x1a5d = JSON.parse;
 var _0x1a63 = JSON.stringify;
 
 try {
@@ -288,7 +364,7 @@ caches.delete(name);
 }
 
 
-function _0x1ae1() {
+function _0x1ae0() {
 var mp = document.getElementById(_$(51));
 if (!mp) return false;
 try {
@@ -299,31 +375,31 @@ if (typeof mp.isAdPlaying === 'function') {
 mp.isAdPlaying = function() {return false;};
 }
 
-if (typeof mp.loadVideoByPlayerVars === 'function' && !mp._0x1a94) {
-mp._0x1a94 = true;
-var _0x1a81 = mp.loadVideoByPlayerVars;
+if (typeof mp.loadVideoByPlayerVars === 'function' && !mp._0x1a97) {
+mp._0x1a97 = true;
+var _0x1a7e = mp.loadVideoByPlayerVars;
 mp.loadVideoByPlayerVars = function(vars) {
-if (_0x1a2e && vars && typeof vars === 'object') {
-_0x1add(vars,0);
+if (_0x1a2c && vars && typeof vars === 'object') {
+_0x1ada(vars,0);
 }
-return _0x1a81.apply(this,arguments);
+return _0x1a7e.apply(this,arguments);
 };
 }
 if (typeof mp.cueVideoByPlayerVars === 'function' && !mp._0x1a9b) {
 mp._0x1a9b = true;
-var _0x1a88 = mp.cueVideoByPlayerVars;
+var _0x1a85 = mp.cueVideoByPlayerVars;
 mp.cueVideoByPlayerVars = function(vars) {
-if (_0x1a2e && vars && typeof vars === 'object') {
-_0x1add(vars,0);
+if (_0x1a2c && vars && typeof vars === 'object') {
+_0x1ada(vars,0);
 }
-return _0x1a88.apply(this,arguments);
+return _0x1a85.apply(this,arguments);
 };
 }
 } catch(e) {}
 return true;
 }
 
-var _0x1b16 = [
+var _0x1b12 = [
 _$(8),_$(9),_$(10),_$(11),
 _$(12),_$(13),_$(14),
 _$(15),_$(16),_$(17),
@@ -332,18 +408,18 @@ _$(20),_$(21),
 _$(22),_$(23),_$(24),
 _$(25),_$(26),_$(27),_$(28)
 ];
-var _0x1b1d = [_$(29),_$(30),_$(31),
+var _0x1b18 = [_$(29),_$(30),_$(31),
 _$(32),_$(33),_$(34),
 _$(35),_$(36),_$(37)];
-function _0x1add(obj,depth) {
+function _0x1ada(obj,depth) {
 if (!obj || typeof obj !== 'object' || depth > 15) return false;
 var cleaned = false;
-for (var i = 0;i < _0x1b16.length;i++) {
-if (obj.hasOwnProperty(_0x1b16[i])) {
-var val = obj[_0x1b16[i]];
-if (Array.isArray(val)) obj[_0x1b16[i]] = [];
-else if (typeof val === 'object' && val !== null) obj[_0x1b16[i]] = {};
-else obj[_0x1b16[i]] = null;
+for (var i = 0;i < _0x1b12.length;i++) {
+if (obj.hasOwnProperty(_0x1b12[i])) {
+var val = obj[_0x1b12[i]];
+if (Array.isArray(val)) obj[_0x1b12[i]] = [];
+else if (typeof val === 'object' && val !== null) obj[_0x1b12[i]] = {};
+else obj[_0x1b12[i]] = null;
 cleaned = true;
 }
 }
@@ -367,18 +443,18 @@ var containers = [_$(66),'response',_$(67),
 'frameworkUpdates','auxiliaryUi','messageRenderers'];
 for (var c = 0;c < containers.length;c++) {
 var skip = false;
-for (var p = 0;p < _0x1b1d.length;p++) {
-if (containers[c] === _0x1b1d[p]) {skip = true;break;}
+for (var p = 0;p < _0x1b18.length;p++) {
+if (containers[c] === _0x1b18[p]) {skip = true;break;}
 }
 if (skip) continue;
 var v = obj[containers[c]];
 if (v) {
 if (Array.isArray(v)) {
 for (var a = 0;a < v.length;a++) {
-if (_0x1add(v[a],depth + 1)) cleaned = true;
+if (_0x1ada(v[a],depth + 1)) cleaned = true;
 }
 } else if (typeof v === 'object') {
-if (_0x1add(v,depth + 1)) cleaned = true;
+if (_0x1ada(v,depth + 1)) cleaned = true;
 }
 }
 }
@@ -389,12 +465,12 @@ return cleaned;
 
 
 JSON.parse = function() {
-var result = _0x1a5f.apply(this,arguments);
-if (_0x1a2e && result && typeof result === 'object') {
+var result = _0x1a5d.apply(this,arguments);
+if (_0x1a2c && result && typeof result === 'object') {
 if (result[_$(8)] || result[_$(9)] || result[_$(10)] ||
 result[_$(66)] || result.onResponseReceivedEndpoints ||
 (result.auxiliaryUi && result.auxiliaryUi.messageRenderers)) {
-if (_0x1add(result,0)) _n('jp_agg');
+if (_0x1ada(result,0)) _n('jp_agg');
 }
 }
 return result;
@@ -403,49 +479,49 @@ try {
 Object.defineProperty(JSON.parse,'name',{value: 'parse' });
 Object.defineProperty(JSON.parse,'length',{value: 2 });
 } catch(e) {}
-JSON.parse.toString = _0x1a5f.toString.bind(_0x1a5f);
+JSON.parse.toString = _0x1a5d.toString.bind(_0x1a5d);
 
 
-var _0x1a6e = window.fetch;
+var _0x1a6b = window.fetch;
 window.fetch = function() {
 var url = arguments[0];
 var urlStr = (typeof url === 'string') ? url : (url && url.url ? url.url : '');
 if (urlStr.includes(_$(68)) && arguments[1] && arguments[1].body) {
 try {
-var body = _0x1a5f(arguments[1].body);
+var body = _0x1a5d(arguments[1].body);
 if (body[_$(49)]) delete body[_$(49)];
 arguments[1].body = _0x1a63(body);
 } catch(e) {}
 }
-return _0x1a6e.apply(this,arguments);
+return _0x1a6b.apply(this,arguments);
 };
 var XHR = XMLHttpRequest.prototype;
-var _0x1a72 = XHR.open;
-var _0x1a79 = XHR.send;
+var _0x1a74 = XHR.open;
+var _0x1a77 = XHR.send;
 XHR.open = function(method,url) {
 this._0x1aa6 = url || '';
-return _0x1a72.apply(this,arguments);
+return _0x1a74.apply(this,arguments);
 };
 XHR.send = function() {
 var url = this._0x1aa6 || '';
 if (url.includes(_$(68)) && arguments[0]) {
 try {
-var body = _0x1a5f(arguments[0]);
+var body = _0x1a5d(arguments[0]);
 if (body[_$(49)]) delete body[_$(49)];
 arguments[0] = _0x1a63(body);
 } catch(e) {}
 }
-return _0x1a79.apply(this,arguments);
+return _0x1a77.apply(this,arguments);
 };
 
-function _0x1ae7(obj,prop) {
+function _0x1aeb(obj,prop) {
 try {
 var _val = obj[prop];
 Object.defineProperty(obj,prop,{
 get: function() {return _val;},
 set: function(v) {
-if (_0x1a2e && v && typeof v === 'object') {
-_0x1add(v,0);
+if (_0x1a2c && v && typeof v === 'object') {
+_0x1ada(v,0);
 }
 _val = v;
 },
@@ -453,46 +529,46 @@ configurable: true,enumerable: true
 });
 } catch(e) {}
 }
-_0x1ae7(window,_$(38));
-_0x1ae7(window,_$(39));
-_0x1ae7(window,_$(40));
+_0x1aeb(window,_$(38));
+_0x1aeb(window,_$(39));
+_0x1aeb(window,_$(40));
 
 try {
-if (window.ytcfg && typeof window.ytcfg.set === 'function' && !window.ytcfg._0x1a94) {
-window.ytcfg._0x1a94 = true;
-var _0x1a8d = window.ytcfg.set;
+if (window.ytcfg && typeof window.ytcfg.set === 'function' && !window.ytcfg._0x1a97) {
+window.ytcfg._0x1a97 = true;
+var _0x1a90 = window.ytcfg.set;
 window.ytcfg.set = function() {
-if (_0x1a2e && arguments[0] && typeof arguments[0] === 'object') {
+if (_0x1a2c && arguments[0] && typeof arguments[0] === 'object') {
 var cfg = arguments[0];
 if (cfg.PLAYER_VARS) {
 try {
 var pv = typeof cfg.PLAYER_VARS === 'string'
-? _0x1a5f(cfg.PLAYER_VARS) : cfg.PLAYER_VARS;
-_0x1add(pv,0);
+? _0x1a5d(cfg.PLAYER_VARS) : cfg.PLAYER_VARS;
+_0x1ada(pv,0);
 cfg.PLAYER_VARS = _0x1a63(pv);
 } catch(e) {}
 }
-if (cfg.INNERTUBE_CONTEXT) _0x1add(cfg.INNERTUBE_CONTEXT,0);
+if (cfg.INNERTUBE_CONTEXT) _0x1ada(cfg.INNERTUBE_CONTEXT,0);
 }
-return _0x1a8d.apply(this,arguments);
+return _0x1a90.apply(this,arguments);
 };
 }
 } catch(e) {}
 
-if (window[_$(38)]) _0x1add(window[_$(38)],0);
-if (window[_$(39)]) _0x1add(window[_$(39)],0);
+if (window[_$(38)]) _0x1ada(window[_$(38)],0);
+if (window[_$(39)]) _0x1ada(window[_$(39)],0);
 
-_0x1ae1();
-setTimeout(_0x1ae1,1000);
-setTimeout(_0x1ae1,3000);
+_0x1ae0();
+setTimeout(_0x1ae0,1000);
+setTimeout(_0x1ae0,3000);
 _n(_$(64));
 }
 
 
 
-function _0x1ad0() {
+function _0x1acf() {
 if (location.pathname.indexOf('/watch') !== 0) return;
-_0x1ac7();
+_0x1ac4();
 var player = document.querySelector('.html5-video-player');
 if (!player) return;
 
@@ -501,28 +577,28 @@ var adModuleHasChildren = adModule && adModule.children.length > 0;
 var hasAdShowing = player.classList.contains(_$(1));
 var hasAdInterrupting = player.classList.contains(_$(2));
 var isAd = hasAdShowing || hasAdInterrupting || adModuleHasChildren;
-if (isAd && !_0x1a11) {
+if (isAd && !_0x1a10) {
 console.log('[MAI AdBlock] AD DETECTADO — ad-showing:' + hasAdShowing + ' ad-interrupting:' + hasAdInterrupting + ' adModule:' + adModuleHasChildren);
 }
 if (!isAd) {
-if (_0x1a11) {
-_0x1a11 = false;
+if (_0x1a10) {
+_0x1a10 = false;
 _0x1a28 = 0;
-_0x1ab4();
+_0x1ab1();
 var v = document.querySelector('video');
 if (v) {
 v.muted = false;
-v.volume = _0x1a16;
+v.volume = _0x1a1a;
 v.playbackRate = 1;
 if (v.paused) try {v.play();} catch(e) {}
 }
 _0x1b00(false);
 _n('ad_ended');
 }
-if (!_0x1a2e && location.pathname.indexOf('/watch') === 0) {
+if (!_0x1a2c && location.pathname.indexOf('/watch') === 0) {
 var cv = document.querySelector('video');
 if (cv && cv.currentTime > 2 && !cv.paused) {
-_0x1a2e = true;
+_0x1a2c = true;
 _0x1ad7();
 _n('aggressive_injected');
 }
@@ -532,19 +608,19 @@ return;
 
 
 var video = document.querySelector('video');
-if (!_0x1a11) {
+if (!_0x1a10) {
 _0x1a28 = Date.now();
-try {if (video) _0x1a16 = video.volume || 1;} catch(e) {}
+try {if (video) _0x1a1a = video.volume || 1;} catch(e) {}
 _0x1b00(true);
 _n('ad_detected');
 }
-_0x1a11 = true;
+_0x1a10 = true;
 
 try {if (video) {video.muted = true;video.volume = 0;} } catch(e) {}
 
-try {_0x1aab();} catch(e) {}
+try {_0x1aac();} catch(e) {}
 
-try {_0x1aba();} catch(e) {}
+try {_0x1ab7();} catch(e) {}
 
 
 if (video) {
@@ -626,45 +702,45 @@ try {node.remove();_n('nr');} catch(e) {}
 }
 });
 
-var _0x1a54 = null;
+var _0x1a55 = null;
 function _0x1b00(fast) {
-if (_0x1a54) clearInterval(_0x1a54);
-_0x1a54 = setInterval(_0x1ad0,fast ? 50 : 200);
+if (_0x1a55) clearInterval(_0x1a55);
+_0x1a55 = setInterval(_0x1acf,fast ? 50 : 200);
 }
 _0x1b00(false);
-function _0x1af9() {
+function _0x1af6() {
 var player = document.querySelector('.html5-video-player');
 if (player) {
 observer.observe(document.body,{childList: true,subtree: true });
-_0x1ad0();
+_0x1acf();
 } else {
-setTimeout(_0x1af9,500);
+setTimeout(_0x1af6,500);
 }
 }
 
 
 
-function _0x1b04() {
-_0x1a2e = false;
-_0x1a3b = false;
+function _0x1b03() {
+_0x1a2c = false;
+_0x1a3d = false;
 }
 function _0x1b0b() {
-_0x1a2e = false;
-_0x1a31 = null;
-_0x1a11 = false;
+_0x1a2c = false;
+_0x1a33 = null;
+_0x1a10 = false;
 _0x1a28 = 0;
-_0x1a3b = false;
-_0x1ab4();
+_0x1a3d = false;
+_0x1ab1();
 _0x1b00(false);
-setTimeout(_0x1ad0,500);
+setTimeout(_0x1acf,500);
 }
-window.addEventListener(_$(75),_0x1b04);
+window.addEventListener(_$(75),_0x1b03);
 window.addEventListener(_$(76),_0x1b0b);
 window.addEventListener(_$(77),_0x1b0b);
 if (document.readyState === 'loading') {
-document.addEventListener('DOMContentLoaded',_0x1af9);
+document.addEventListener('DOMContentLoaded',_0x1af6);
 } else {
-_0x1af9();
+_0x1af6();
 }
 })();
 }}

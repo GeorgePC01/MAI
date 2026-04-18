@@ -1,12 +1,12 @@
 # Makefile para MAI Browser
 # v0.5.0 - CEF Hybrid Engine + Anti-RE Hardening
 
-.PHONY: build run clean test help bundle app helper cef-check encrypt-scripts obfuscate-scripts
+.PHONY: build run clean test help bundle bundle-release app app-release helper cef-check encrypt-scripts obfuscate-scripts
 
 # Variables
 SWIFT = swift
 BUILD_DIR = .build
-RELEASE_DIR = $(BUILD_DIR)/release
+RELEASE_DIR = $(BUILD_DIR)/arm64-apple-macosx/release
 DEBUG_DIR = $(BUILD_DIR)/arm64-apple-macosx/debug
 APP_NAME = MAI
 BUNDLE = $(APP_NAME).app
@@ -120,6 +120,71 @@ app: bundle ## Compila y ejecuta como .app (RECOMENDADO)
 	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_run/$(BUNDLE) 2>/dev/null || true
 	@codesign --verify --deep --strict /tmp/_mai_run/$(BUNDLE) 2>/dev/null && echo "✅ Firma verificada en /tmp" || echo "⚠️  Firma no verificada"
 	@echo "🚀 Ejecutando $(BUNDLE) desde /tmp/_mai_run/..."
+	@open /tmp/_mai_run/$(BUNDLE)
+
+bundle-release: build helper ## Crea bundle en modo Release (con -dead_strip + anti-RE hardening)
+	@echo "📦 Creando $(BUNDLE) (Release con anti-RE hardening)..."
+	@rm -rf $(BUNDLE) /tmp/_mai_sign
+	@mkdir -p /tmp/_mai_sign/$(BUNDLE)/Contents/MacOS
+	@mkdir -p /tmp/_mai_sign/$(BUNDLE)/Contents/Resources
+	@mkdir -p "/tmp/_mai_sign/$(BUNDLE)/Contents/Frameworks"
+	@ditto --norsrc $(RELEASE_DIR)/$(APP_NAME) /tmp/_mai_sign/$(BUNDLE)/Contents/MacOS/$(APP_NAME)
+	@chmod +x /tmp/_mai_sign/$(BUNDLE)/Contents/MacOS/$(APP_NAME)
+	@cp Resources/Info.plist /tmp/_mai_sign/$(BUNDLE)/Contents/
+	@cp Resources/MAI.entitlements /tmp/_mai_sign/$(BUNDLE)/Contents/Resources/ 2>/dev/null || true
+	@cp assets/AppIcon.icns /tmp/_mai_sign/$(BUNDLE)/Contents/Resources/ 2>/dev/null || true
+	@echo "📦 Copiando Chromium Embedded Framework..."
+	@ditto --norsrc "Frameworks/Chromium Embedded Framework.framework" "/tmp/_mai_sign/$(BUNDLE)/Contents/Frameworks/Chromium Embedded Framework.framework"
+	@echo "📦 Creando 5 CEF Helper bundles..."
+	@/bin/bash -c '\
+		SIGNDIR="/tmp/_mai_sign"; \
+		create_helper() { \
+			local hname="$$1" bundleid="$$2"; \
+			echo "  → $$hname.app ($$bundleid)"; \
+			mkdir -p "$$SIGNDIR/$(BUNDLE)/Contents/Frameworks/$$hname.app/Contents/MacOS"; \
+			ditto --norsrc $(BUILD_DIR)/helper/"$(HELPER_NAME)" "$$SIGNDIR/$(BUNDLE)/Contents/Frameworks/$$hname.app/Contents/MacOS/$$hname"; \
+			chmod +x "$$SIGNDIR/$(BUNDLE)/Contents/Frameworks/$$hname.app/Contents/MacOS/$$hname"; \
+			printf "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<!DOCTYPE plist PUBLIC \"-//Apple//DTD PLIST 1.0//EN\" \"http://www.apple.com/DTDs/PropertyList-1.0.dtd\">\n<plist version=\"1.0\">\n<dict>\n\t<key>CFBundleExecutable</key>\n\t<string>%s</string>\n\t<key>CFBundleIdentifier</key>\n\t<string>%s</string>\n\t<key>CFBundleName</key>\n\t<string>%s</string>\n\t<key>CFBundlePackageType</key>\n\t<string>APPL</string>\n\t<key>LSUIElement</key>\n\t<true/>\n</dict>\n</plist>\n" "$$hname" "$$bundleid" "$$hname" > "$$SIGNDIR/$(BUNDLE)/Contents/Frameworks/$$hname.app/Contents/Info.plist"; \
+		}; \
+		create_helper "$(HELPER_NAME)" "com.mai.browser.helper"; \
+		create_helper "$(HELPER_NAME) (Alerts)" "com.mai.browser.helper.alerts"; \
+		create_helper "$(HELPER_NAME) (GPU)" "com.mai.browser.helper.gpu"; \
+		create_helper "$(HELPER_NAME) (Plugin)" "com.mai.browser.helper.plugin"; \
+		create_helper "$(HELPER_NAME) (Renderer)" "com.mai.browser.helper.renderer"'
+	@echo "✅ 5 helper bundles creados"
+	@echo "🔒 Stripping symbols (post-link)..."
+	@strip -x /tmp/_mai_sign/$(BUNDLE)/Contents/MacOS/$(APP_NAME) 2>/dev/null || true
+	@find /tmp/_mai_sign/$(BUNDLE) -name '*.md' -not -path '*/Resources/*' -delete 2>/dev/null || true
+	@find /tmp/_mai_sign/$(BUNDLE) -name '.DS_Store' -delete 2>/dev/null || true
+	@find /tmp/_mai_sign/$(BUNDLE) -name '._*' -delete 2>/dev/null || true
+	@echo "🧹 Limpiando xattrs..."
+	@xattr -cr /tmp/_mai_sign/$(BUNDLE) 2>/dev/null || true
+	@echo "🔐 Firmando con hardened runtime (inside-out)..."
+	@for helper in /tmp/_mai_sign/$(BUNDLE)/Contents/Frameworks/*.app; do \
+		codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements "$$helper" 2>/dev/null || true; \
+	done
+	@codesign --force --sign - --options runtime "/tmp/_mai_sign/$(BUNDLE)/Contents/Frameworks/Chromium Embedded Framework.framework" 2>/dev/null || true
+	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_sign/$(BUNDLE)/Contents/MacOS/$(APP_NAME) 2>/dev/null || true
+	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_sign/$(BUNDLE) 2>/dev/null || echo "⚠️  Firma sin entitlements"
+	@codesign --verify --deep --strict /tmp/_mai_sign/$(BUNDLE) 2>/dev/null && echo "✅ Firma verificada en /tmp" || echo "⚠️  Firma no verificada en /tmp"
+	@ditto --norsrc /tmp/_mai_sign/$(BUNDLE) $(BUNDLE)
+	@rm -rf /tmp/_mai_sign
+	@echo "✅ Bundle Release creado: $(BUNDLE)"
+
+app-release: bundle-release ## Compila Release (con -dead_strip + hardening) y ejecuta
+	@echo "🚀 Preparando ejecución Release (copia a /tmp)..."
+	@rm -rf /tmp/_mai_run/$(BUNDLE)
+	@mkdir -p /tmp/_mai_run
+	@ditto --norsrc $(BUNDLE) /tmp/_mai_run/$(BUNDLE)
+	@xattr -cr /tmp/_mai_run/$(BUNDLE) 2>/dev/null || true
+	@for helper in /tmp/_mai_run/$(BUNDLE)/Contents/Frameworks/*.app; do \
+		codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements "$$helper" 2>/dev/null || true; \
+	done
+	@codesign --force --sign - --options runtime "/tmp/_mai_run/$(BUNDLE)/Contents/Frameworks/Chromium Embedded Framework.framework" 2>/dev/null || true
+	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_run/$(BUNDLE)/Contents/MacOS/$(APP_NAME) 2>/dev/null || true
+	@codesign --force --sign - --options runtime --entitlements Resources/MAI.entitlements /tmp/_mai_run/$(BUNDLE) 2>/dev/null || true
+	@codesign --verify --deep --strict /tmp/_mai_run/$(BUNDLE) 2>/dev/null && echo "✅ Firma verificada en /tmp" || echo "⚠️  Firma no verificada"
+	@echo "🚀 Ejecutando $(BUNDLE) (Release) desde /tmp/_mai_run/..."
 	@open /tmp/_mai_run/$(BUNDLE)
 
 run: app ## Alias para 'app' - ejecuta el navegador correctamente

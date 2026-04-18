@@ -26,6 +26,7 @@ final class WKRenderPipeline {
     @_silgen_name("ptrace")
     private static func _ptrace(_ request: CInt, _ pid: pid_t, _ addr: UnsafeMutableRawPointer?, _ data: CInt) -> CInt
 
+    @inline(never)
     private static func _denyDebuggerAttach() {
         let _: CInt = _ptrace(31, 0, nil, 0)
     }
@@ -72,8 +73,10 @@ final class WKRenderPipeline {
     }
 
     // Key split: actual key = _ka[i] ^ _kb[i]. Neither array alone reveals the key.
-    private static let _ka: [UInt8] = [0x3E, 0x5D, 0x8F, 0xC2, 0x47, 0xAB, 0x19, 0x76]
-    private static let _kb: [UInt8] = [0x71, 0x28, 0xE4, 0x56, 0xB3, 0xCF, 0x5A, 0xF1]
+    // @_used: prevent -dead_strip from eliminating these arrays under Release build
+    // (referenced only inside @inline(never) _deobf, no direct Swift references).
+    @_used private static let _ka: [UInt8] = [0x3E, 0x5D, 0x8F, 0xC2, 0x47, 0xAB, 0x19, 0x76]
+    @_used private static let _kb: [UInt8] = [0x71, 0x28, 0xE4, 0x56, 0xB3, 0xCF, 0x5A, 0xF1]
 
     @inline(never)
     private static func _deobf(_ encoded: [UInt8]) -> String {
